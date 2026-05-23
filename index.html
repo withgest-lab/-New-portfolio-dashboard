@@ -1283,65 +1283,76 @@ function getPeriodStart(period) {
 /* ── 1D: 야후 파이낸스 5분봉 인트라데이 ── */
 async function fetch1DIntraday() {
   setStatus('loading', '1D 시세 데이터 로딩 중...');
-  const start = getPeriodStart('1D');
-  const startTs = Math.floor(start.getTime() / 1000);
-  const endTs   = Math.floor(Date.now() / 1000);
+  const start    = getPeriodStart('1D');
+  const startTs  = Math.floor(start.getTime() / 1000);
+  const endTs    = Math.floor(Date.now() / 1000);
 
-  // 종목별 5분봉 가져오기
+  // ── 프록시 목록 (순서대로 시도) ──
+  const PROXIES = [
+    'https://corsproxy.io/?',
+    'https://api.allorigins.win/raw?url=',
+    'https://cors-anywhere.herokuapp.com/',
+  ];
+
+  async function fetchWithProxy(url) {
+    for (const proxy of PROXIES) {
+      try {
+        const fullUrl = proxy + encodeURIComponent(url);
+        const res = await fetch(fullUrl, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) return await res.json();
+      } catch(e) { continue; }
+    }
+    return null;
+  }
+
+  // ── 종목별 5분봉 시도 ──
   const results = await Promise.allSettled(
     assets.map(async a => {
+      if (a.ticker === '—') return { id: a.id, points: [] };
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${a.ticker}?interval=5m&range=2d`;
-      try {
-        const res = await fetch(YAHOO_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const json = await res.json();
-        const result = json?.chart?.result?.[0];
-        if (!result) throw new Error('no result');
-        const timestamps = result.timestamp || [];
-        const closes = result.indicators?.quote?.[0]?.close || [];
-        // 06:05 이후 데이터만 필터링
-        const points = [];
-        timestamps.forEach((ts, i) => {
-          if (ts >= startTs && ts <= endTs && closes[i] != null) {
-            points.push({ ts: ts * 1000, price: closes[i] });
-          }
-        });
-        return { id: a.id, points };
-      } catch(e) {
-        return { id: a.id, points: [] };
-      }
+      const json = await fetchWithProxy(url);
+      const result = json?.chart?.result?.[0];
+      if (!result) return { id: a.id, points: [] };
+      const timestamps = result.timestamp || [];
+      const closes = result.indicators?.quote?.[0]?.close || [];
+      const points = [];
+      timestamps.forEach((ts, i) => {
+        if (ts >= startTs && ts <= endTs && closes[i] != null)
+          points.push({ ts: ts * 1000, price: closes[i] });
+      });
+      return { id: a.id, points };
     })
   );
 
-  // 공통 타임스탬프 축 구성 (5분 간격, 시작~현재)
+  // 유효 포인트 집계
   const allTs = new Set();
   results.forEach(r => {
     if (r.status === 'fulfilled') r.value.points.forEach(p => allTs.add(p.ts));
   });
   const sortedTs = [...allTs].sort((a,b)=>a-b);
-  if (!sortedTs.length) return null;
 
-  // 각 시각별 원화 환산 합산
+  if (!sortedTs.length) {
+    // 5분봉 실패 → 일봉 fallback
+    return await fetch1DDailyFallback(start);
+  }
+
   const history = sortedTs.map(ts => {
     const byAsset = {};
     results.forEach((r, i) => {
       if (r.status !== 'fulfilled') return;
       const a = assets[i];
       const pts = r.value.points;
-      // 해당 ts와 가장 가까운 이전 가격 사용
       let price = null;
       for (let j = pts.length-1; j >= 0; j--) {
         if (pts[j].ts <= ts) { price = pts[j].price; break; }
       }
       if (price == null && pts.length) price = pts[0].price;
-      if (price != null) {
-        byAsset[a.id] = Math.round(toKRW(a, price) * a.quantity);
-      }
+      if (price != null) byAsset[a.id] = Math.round(toKRW(a, price) * a.quantity);
     });
     return { ts, byAsset };
   });
 
-  // 시작점 추가 (06:05 시점 — 각 종목의 첫 가격 사용)
+  // 시작점
   if (history.length && history[0].ts > start.getTime() + 5*60*1000) {
     const firstByAsset = {};
     results.forEach((r, i) => {
@@ -1352,56 +1363,93 @@ async function fetch1DIntraday() {
     });
     history.unshift({ ts: start.getTime(), byAsset: firstByAsset });
   }
-
-  // 끝점: 현재 평가금액
+  // 끝점
   if (history.length) {
     const last = history[history.length-1];
     assets.forEach(a => { last.byAsset[a.id] = Math.round(evKRW(a)); });
   }
 
-  setStatus('ok', `1D 로딩 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
+  setStatus('ok', `1D 로딩 완료 · ${new Date().toLocaleTimeString('ko-KR')}`);
   return history;
 }
 
-/* ── 1W~ALL: 스냅샷 기반 ── */
+/* ── 1D fallback: 일봉 open→현재 2포인트 ── */
+async function fetch1DDailyFallback(start) {
+  setStatus('loading', '일봉 데이터로 대체 중...');
+  const results = await Promise.allSettled(
+    assets.map(async a => {
+      if (a.ticker === '—') return { id: a.id, open: null };
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${a.ticker}?interval=1d&range=2d`;
+      for (const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']) {
+        try {
+          const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
+          if (!res.ok) continue;
+          const json = await res.json();
+          const meta = json?.chart?.result?.[0]?.meta;
+          return { id: a.id, open: meta?.chartPreviousClose || meta?.regularMarketPrice || null };
+        } catch(e) { continue; }
+      }
+      return { id: a.id, open: null };
+    })
+  );
+
+  // 시작점: 각 종목 전일종가
+  const startByAsset = {};
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value.open != null) {
+      const a = assets[i];
+      startByAsset[a.id] = Math.round(toKRW(a, r.value.open) * a.quantity);
+    }
+  });
+  // 끝점: 현재 평가금액
+  const endByAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(evKRW(a))]));
+
+  const hasData = Object.keys(startByAsset).length > 0;
+  if (!hasData) {
+    setStatus('err', '시세 조회 실패 — 🔄 갱신 후 재시도하세요');
+    return null;
+  }
+
+  setStatus('ok', `일봉 기준 표시 · ${new Date().toLocaleTimeString('ko-KR')}`);
+  return [
+    { ts: start.getTime(), byAsset: startByAsset },
+    { ts: Date.now(),      byAsset: endByAsset   },
+  ];
+}
+
+/* ── 1W~ALL: 스냅샷 + 야후 일봉 보완 ── */
 function buildSnapshotHistory(period) {
-  const start = getPeriodStart(period);
+  const start   = getPeriodStart(period);
   const startTs = start.getTime();
-  const snaps = loadSnaps()
-    .filter(s => s.timestamp >= startTs)
+  const snaps   = loadSnaps()
+    .filter(s => s.timestamp >= startTs && Object.keys(s.byAsset||{}).length > 0)
     .sort((a,b) => a.timestamp - b.timestamp);
 
+  const nowByAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(evKRW(a))]));
+  const nowTotal   = Object.values(nowByAsset).reduce((s,v) => s+v, 0);
+
   if (!snaps.length) {
-    // 스냅샷 없으면 현재값만 찍음
-    const byAsset = Object.fromEntries(assets.map(a=>[a.id, Math.round(evKRW(a))]));
+    // 스냅샷 없으면 원금 → 현재 2포인트
+    const costByAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(costKRW(a))]));
     return [
-      { ts: startTs, byAsset: Object.fromEntries(assets.map(a=>[a.id, Math.round(costKRW(a))])) },
-      { ts: Date.now(), byAsset }
+      { ts: startTs,    byAsset: costByAsset },
+      { ts: Date.now(), byAsset: nowByAsset  },
     ];
   }
 
-  // 시작점 (period 기준점) 추가
-  const history = [];
-  // 시작점: 해당 시점 직전 스냅샷 or 첫 스냅샷 사용
+  // 시작점 보간
   const beforeStart = loadSnaps()
-    .filter(s => s.timestamp < startTs)
+    .filter(s => s.timestamp < startTs && Object.keys(s.byAsset||{}).length > 0)
     .sort((a,b) => b.timestamp - a.timestamp)[0];
 
-  if (beforeStart && Object.keys(beforeStart.byAsset).length) {
+  const history = [];
+  if (beforeStart) {
     history.push({ ts: startTs, byAsset: { ...beforeStart.byAsset } });
-  } else if (snaps.length) {
+  } else {
     history.push({ ts: startTs, byAsset: { ...snaps[0].byAsset } });
   }
 
-  // 중간 스냅샷들
-  snaps.forEach(s => {
-    if (Object.keys(s.byAsset).length) {
-      history.push({ ts: s.timestamp, byAsset: { ...s.byAsset } });
-    }
-  });
-
-  // 끝점: 현재 평가금액
-  const nowByAsset = Object.fromEntries(assets.map(a=>[a.id, Math.round(evKRW(a))]));
+  snaps.forEach(s => history.push({ ts: s.timestamp, byAsset: { ...s.byAsset } }));
   history.push({ ts: Date.now(), byAsset: nowByAsset });
 
   return history;
