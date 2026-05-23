@@ -301,25 +301,28 @@
   </div>
 
   <!-- 4. 비중 현황 -->
-  <div class="donut-grid">
-    <!-- 카테고리 도넛 (레이블 직접 표시) -->
-    <div class="donut-card">
-      <div class="section-label">카테고리 비중</div>
-      <div style="display:flex;justify-content:center;">
+  <div class="card">
+    <div style="display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap;">
+
+      <!-- 왼쪽: 카테고리 도넛 -->
+      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;">
+        <div class="section-label" style="align-self:flex-start;">카테고리 비중</div>
         <div class="donut-canvas-wrap">
-          <canvas id="catDonut" width="440" height="360"></canvas>
+          <canvas id="catDonut" width="340" height="280"></canvas>
           <div class="donut-center">
             <div class="dc-label">총 자산</div>
             <div class="dc-val" id="catCenter">—</div>
           </div>
         </div>
+        <div id="catLegend" style="display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:center;margin-top:12px;max-width:340px;"></div>
       </div>
-      <div class="legend" id="catLegend" style="margin-top:16px;flex-direction:row;flex-wrap:wrap;gap:10px 20px;justify-content:center;display:flex;"></div>
-    </div>
-    <!-- 종목 비중 가로 막대 차트 -->
-    <div class="donut-card">
-      <div class="section-label">종목 비중</div>
-      <div id="barChart" style="display:flex;flex-direction:column;gap:10px;"></div>
+
+      <!-- 오른쪽: 종목 비중 막대 -->
+      <div style="flex:1;min-width:260px;">
+        <div class="section-label">종목 비중</div>
+        <div id="barChart" style="display:flex;flex-direction:column;gap:10px;"></div>
+      </div>
+
     </div>
   </div>
 
@@ -703,9 +706,9 @@ function drawDonutWithLabels(canvasId, data) {
   const dpr = window.devicePixelRatio || 1;
 
   // 논리 크기 — 좌우 레이블 공간 충분히 확보
-  const LW = 440, LH = 360;
+  const LW = 340, LH = 280;
   const cx = LW/2, cy = LH/2;
-  const OR = 108, IR = 64;
+  const OR = 86, IR = 52;
 
   cv.width  = Math.round(LW * dpr);
   cv.height = Math.round(LH * dpr);
@@ -750,7 +753,7 @@ function drawDonutWithLabels(canvasId, data) {
       const x2 = cx + cosM*r2, y2 = cy + sinM*r2;
 
       // 수평선 길이: 세그먼트 작을수록 더 길게
-      const hLen = sw < 0.4 ? 28 : 18;
+      const hLen = sw < 0.4 ? 22 : 14;
       const x3 = x2 + (isRight ? hLen : -hLen);
       const y3 = y2;
 
@@ -771,9 +774,9 @@ function drawDonutWithLabels(canvasId, data) {
       // 경계 보호: 텍스트가 캔버스 밖으로 나가지 않도록
       const pct    = ((d.value/total)*100).toFixed(1) + '%';
       const fmtVal = fmt(d.value);
-      ctx.font = `bold 13px Pretendard,-apple-system,sans-serif`;
+      ctx.font = `bold 11px Pretendard,-apple-system,sans-serif`;
       const pctW = ctx.measureText(pct).width;
-      ctx.font = `11px Pretendard,-apple-system,sans-serif`;
+      ctx.font = `10px Pretendard,-apple-system,sans-serif`;
       const valW = ctx.measureText(fmtVal).width;
       const maxW = Math.max(pctW, valW);
 
@@ -788,14 +791,14 @@ function drawDonutWithLabels(canvasId, data) {
       ctx.textAlign = isRight ? 'left' : 'right';
 
       // % 텍스트
-      ctx.font = `bold 13px Pretendard,-apple-system,sans-serif`;
+      ctx.font = `bold 11px Pretendard,-apple-system,sans-serif`;
       ctx.fillStyle = '#1c1c1e';
       ctx.fillText(pct, tx, ty - 2);
 
       // 금액 텍스트
-      ctx.font = `11px Pretendard,-apple-system,sans-serif`;
+      ctx.font = `10px Pretendard,-apple-system,sans-serif`;
       ctx.fillStyle = '#636366';
-      ctx.fillText(fmtVal, tx, ty + 13);
+      ctx.fillText(fmtVal, tx, ty + 11);
     }
     angle += sw;
   });
