@@ -368,9 +368,18 @@ const ASSET_COLS= ['#5ac8fa','#ffd60a','#30d158','#bf5af2','#ff6961','#32ade6','
 const CUR_SYM   = { KRW:'₩', USD:'$', JPY:'¥' };
 const SNAP_KEY  = 'pf_snaps_v5';
 const ASSETS_KEY= 'pf_assets_v1';
+const FX_KEY    = 'pf_fx_v1';
 
-/* 환율 (야후에서 갱신) */
-let FX = { USD: 1368.5, JPY: 9.14 };
+/* 환율 — localStorage에서 불러오기, 없으면 기본값 */
+function loadFX() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FX_KEY));
+    if (saved && saved.USD && saved.JPY) return saved;
+  } catch(e) {}
+  return { USD: 1368.5, JPY: 9.14 };
+}
+function saveFX() { localStorage.setItem(FX_KEY, JSON.stringify(FX)); }
+let FX = loadFX();
 
 /* ═══════════════════════════════════
    자산 데이터 (실제 보유 종목)
@@ -457,6 +466,7 @@ async function fetchAllPrices() {
     ]);
     if (usd) FX.USD = usd;
     if (jpy) FX.JPY = jpy;
+    saveFX(); // 환율 localStorage 저장
 
     // 2. 종목별 시세
     const results = await Promise.allSettled(
