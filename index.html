@@ -277,7 +277,20 @@
         <tbody id="assetTbody"></tbody>
       </table>
     </div>
-    <div class="add-form">
+    <!-- 매수/매도 탭 -->
+    <div style="display:flex;gap:0;margin-bottom:14px;border-bottom:1px solid var(--color-border-tertiary);">
+      <button id="tab_buy" onclick="switchTab('buy')"
+        style="border:none;background:none;cursor:pointer;padding:8px 18px;font-family:inherit;
+               font-size:13px;font-weight:700;color:var(--color-accent);
+               border-bottom:2px solid var(--color-accent);margin-bottom:-1px;">매수</button>
+      <button id="tab_sell" onclick="switchTab('sell')"
+        style="border:none;background:none;cursor:pointer;padding:8px 18px;font-family:inherit;
+               font-size:13px;font-weight:600;color:var(--color-text-tertiary);
+               border-bottom:2px solid transparent;margin-bottom:-1px;">매도</button>
+    </div>
+
+    <!-- 매수 폼 -->
+    <div id="form_buy" class="add-form">
       <label style="position:relative;">종목명
         <input id="af_name" placeholder="" style="width:140px" oninput="searchTicker(this.value)" autocomplete="off">
         <div id="af_suggestions" style="
@@ -301,14 +314,33 @@
         <option value="cash">현금</option>
       </select></label>
       <label>수량<input id="af_qty" type="number" placeholder="" style="width:80px"></label>
-      <label>평균단가<input id="af_price" type="number" placeholder="" style="width:100px"></label>
+      <label>매수단가<input id="af_price" type="number" placeholder="" style="width:100px"></label>
       <label>통화<select id="af_cur">
         <option value="KRW">KRW ₩</option>
         <option value="USD">USD $</option>
         <option value="JPY">JPY ¥</option>
       </select></label>
-      <button class="btn btn-primary" onclick="addAsset()">+ 추가</button>
+      <button class="btn btn-primary" onclick="addAsset()">+ 매수</button>
     </div>
+
+    <!-- 매도 폼 -->
+    <div id="form_sell" class="add-form" style="display:none;">
+      <label style="position:relative;">종목명
+        <input id="sf_name" placeholder="" style="width:140px" oninput="searchSell(this.value)" autocomplete="off">
+        <div id="sf_suggestions" style="
+          display:none;position:absolute;top:100%;left:0;z-index:200;
+          background:#fff;border:1px solid #e5e5ea;border-radius:10px;
+          box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:280px;max-height:220px;
+          overflow-y:auto;margin-top:4px;">
+        </div>
+      </label>
+      <label>티커<input id="sf_ticker" placeholder="" style="width:110px;background:var(--color-section-bg);" readonly></label>
+      <label>보유수량<input id="sf_held" placeholder="" style="width:80px;background:var(--color-section-bg);" readonly></label>
+      <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
+      <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
+      <button class="btn" style="background:#ff3b3015;color:var(--color-up);" onclick="sellAsset()">− 매도</button>
+    </div>
+
     <div id="addAssetStatus" style="font-size:12px;color:#636366;padding-top:8px;min-height:18px;"></div>
   </div>
 
@@ -761,13 +793,6 @@ function selectTicker(sym, name, cat, cur) {
   document.getElementById('af_qty').focus();
 }
 
-document.addEventListener('click', e => {
-  const box = document.getElementById('af_suggestions');
-  if (box && !box.contains(e.target) && e.target.id !== 'af_name') {
-    box.style.display = 'none';
-  }
-});
-
 function addAsset() {
   const name   = document.getElementById('af_name').value.trim();
   const ticker = document.getElementById('af_ticker').value.trim().toUpperCase();
@@ -782,15 +807,38 @@ function addAsset() {
   if (isNaN(qty) || qty <= 0) { statusEl.textContent = '❌ 수량을 입력해 주세요.'; return; }
   if (isNaN(price)||price<=0) { statusEl.textContent = '❌ 평균단가를 입력해 주세요.'; return; }
 
-  // 티커 없으면 시세 갱신 불가 안내 (추가는 허용)
   const tickerVal = ticker || '—';
 
-  assets.push({
-    id: uid(), ticker: tickerVal, name, category: cat,
-    quantity: qty, avgPrice: price,
-    currentPrice: price, prevPrice: price,
-    currency: cur
-  });
+  // ── 같은 티커 기존 종목 검색 ──
+  const existing = tickerVal !== '—'
+    ? assets.find(a => a.ticker.toUpperCase() === tickerVal)
+    : null;
+
+  if (existing) {
+    // 가중평균 단가 계산: (기존원금 + 신규원금) / 총수량
+    const prevCost = existing.avgPrice * existing.quantity;
+    const newCost  = price * qty;
+    const totalQty = existing.quantity + qty;
+    const newAvg   = (prevCost + newCost) / totalQty;
+
+    existing.quantity  = totalQty;
+    existing.avgPrice  = Math.round(newAvg * 100) / 100;
+    // 현재가는 유지 (다음 🔄 시세 갱신 때 업데이트)
+
+    statusEl.textContent =
+      `✅ ${existing.name} ${qty.toLocaleString()}주 추가 → 총 ${totalQty.toLocaleString()}주, 평균단가 ${newAvg.toLocaleString('ko-KR',{maximumFractionDigits:0})}원으로 업데이트`;
+  } else {
+    // 새 종목 추가
+    assets.push({
+      id: uid(), ticker: tickerVal, name, category: cat,
+      quantity: qty, avgPrice: price,
+      currentPrice: price, prevPrice: price,
+      currency: cur
+    });
+    statusEl.textContent = ticker
+      ? `✅ ${name}(${ticker}) 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`
+      : `✅ ${name} 추가 완료 — ✏️ 편집에서 티커를 입력하면 시세 갱신이 됩니다.`;
+  }
 
   // 폼 초기화
   ['af_name','af_ticker','af_qty','af_price'].forEach(id => document.getElementById(id).value = '');
@@ -798,13 +846,125 @@ function addAsset() {
   document.getElementById('af_cur').value = 'KRW';
   document.getElementById('af_suggestions').style.display = 'none';
 
-  if (!ticker) {
-    statusEl.textContent = `✅ ${name} 추가 완료 — 티커를 나중에 ✏️ 편집에서 입력하면 시세 갱신이 됩니다.`;
-  } else {
-    statusEl.textContent = `✅ ${name}(${ticker}) 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`;
-  }
   setTimeout(() => { statusEl.textContent = ''; }, 5000);
+  saveAssets();
+  renderAll();
+}
 
+/* ═══════════════════════════════════
+   매수/매도 탭 전환
+═══════════════════════════════════ */
+function switchTab(tab) {
+  const isBuy = tab === 'buy';
+  document.getElementById('form_buy').style.display  = isBuy ? 'flex' : 'none';
+  document.getElementById('form_sell').style.display = isBuy ? 'none' : 'flex';
+  document.getElementById('tab_buy').style.color     = isBuy ? 'var(--color-accent)' : 'var(--color-text-tertiary)';
+  document.getElementById('tab_sell').style.color    = isBuy ? 'var(--color-text-tertiary)' : 'var(--color-up)';
+  document.getElementById('tab_buy').style.borderBottomColor  = isBuy ? 'var(--color-accent)' : 'transparent';
+  document.getElementById('tab_sell').style.borderBottomColor = isBuy ? 'transparent' : 'var(--color-up)';
+  document.getElementById('addAssetStatus').textContent = '';
+}
+
+/* ═══════════════════════════════════
+   매도 종목 검색 (보유 종목 중에서)
+═══════════════════════════════════ */
+function searchSell(query) {
+  const box = document.getElementById('sf_suggestions');
+  const q   = query.trim().toLowerCase();
+  if (!q) { box.style.display='none'; return; }
+
+  const results = assets.filter(a =>
+    a.name.toLowerCase().includes(q) ||
+    a.ticker.toLowerCase().includes(q)
+  ).slice(0, 8);
+
+  if (!results.length) {
+    box.innerHTML = `<div style="padding:10px 14px;font-size:12px;color:#8e8e93;">보유 종목에서 찾을 수 없습니다</div>`;
+    box.style.display = 'block'; return;
+  }
+
+  const catColor = {stock_kr:'#007aff', stock_us:'#ff9500', stock_jp:'#30b0c7', crypto:'#ff3b30'};
+  box.innerHTML = results.map(a => {
+    const cc = catColor[a.category]||'#8e8e93';
+    const sym = CUR_SYM[a.currency]||'';
+    return `<div onclick="selectSell('${a.id}')"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f2f2f7;
+             display:flex;gap:10px;align-items:center;"
+      onmouseover="this.style.background='#f2f2f7'"
+      onmouseout="this.style.background='#fff'">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600;">${a.name}</div>
+        <div style="font-size:11px;color:#8e8e93;">${a.ticker} · 보유 ${a.quantity.toLocaleString()}주 · 평균 ${sym}${a.avgPrice.toLocaleString()}</div>
+      </div>
+    </div>`;
+  }).join('');
+  box.style.display = 'block';
+}
+
+function selectSell(id) {
+  const a = assets.find(x => x.id === id); if (!a) return;
+  document.getElementById('sf_name').value   = a.name;
+  document.getElementById('sf_ticker').value = a.ticker;
+  document.getElementById('sf_held').value   = a.quantity.toLocaleString() + '주';
+  document.getElementById('sf_suggestions').style.display = 'none';
+  document.getElementById('sf_qty').focus();
+  // id를 hidden으로 저장
+  document.getElementById('sf_name').dataset.assetId = id;
+}
+
+document.addEventListener('click', e => {
+  ['af_suggestions','sf_suggestions'].forEach(boxId => {
+    const box = document.getElementById(boxId);
+    const inputId = boxId === 'af_suggestions' ? 'af_name' : 'sf_name';
+    if (box && !box.contains(e.target) && e.target.id !== inputId) {
+      box.style.display = 'none';
+    }
+  });
+});
+
+/* ═══════════════════════════════════
+   매도 처리
+═══════════════════════════════════ */
+function sellAsset() {
+  const statusEl  = document.getElementById('addAssetStatus');
+  const assetId   = document.getElementById('sf_name').dataset.assetId;
+  const sellQty   = parseFloat(document.getElementById('sf_qty').value);
+  const sellPrice = parseFloat(document.getElementById('sf_price').value);
+
+  if (!assetId)              { statusEl.textContent = '❌ 종목을 선택해 주세요.'; return; }
+  if (isNaN(sellQty)||sellQty<=0) { statusEl.textContent = '❌ 매도 수량을 입력해 주세요.'; return; }
+  if (isNaN(sellPrice)||sellPrice<=0) { statusEl.textContent = '❌ 매도 단가를 입력해 주세요.'; return; }
+
+  const a = assets.find(x => x.id === assetId);
+  if (!a) { statusEl.textContent = '❌ 종목을 찾을 수 없습니다.'; return; }
+
+  if (sellQty > a.quantity) {
+    statusEl.textContent = `❌ 보유 수량(${a.quantity.toLocaleString()}주)보다 많이 매도할 수 없습니다.`; return;
+  }
+
+  // 실현손익 계산 (매도가 - 평균단가) × 매도수량
+  const realizedPnl = (sellPrice - a.avgPrice) * sellQty;
+  const pnlSign     = realizedPnl >= 0 ? '+' : '';
+  const sym         = CUR_SYM[a.currency] || '';
+
+  if (sellQty === a.quantity) {
+    // 전량 매도 → 종목 삭제
+    assets = assets.filter(x => x.id !== assetId);
+    statusEl.innerHTML = `✅ ${a.name} 전량 매도 완료 · 실현손익 <b style="color:${realizedPnl>=0?'var(--color-up)':'var(--color-down)'}">${pnlSign}${sym}${Math.round(Math.abs(realizedPnl)).toLocaleString()}</b>`;
+  } else {
+    // 일부 매도 → 수량만 차감, 평균단가 유지 (한국 증권사 표준)
+    a.quantity -= sellQty;
+    statusEl.innerHTML = `✅ ${a.name} ${sellQty.toLocaleString()}주 매도 · 잔여 ${a.quantity.toLocaleString()}주 · 실현손익 <b style="color:${realizedPnl>=0?'var(--color-up)':'var(--color-down)'}">${pnlSign}${sym}${Math.round(Math.abs(realizedPnl)).toLocaleString()}</b>`;
+  }
+
+  // 폼 초기화
+  ['sf_name','sf_ticker','sf_held','sf_qty','sf_price'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = '';
+    if (el.dataset) delete el.dataset.assetId;
+  });
+
+  setTimeout(() => { statusEl.textContent = ''; }, 6000);
   saveAssets();
   renderAll();
 }
@@ -952,7 +1112,7 @@ function renderBarChart(data, total) {
         <div style="width:${barW}%;background:${d.color};height:100%;border-radius:4px;transition:width .4s;"></div>
       </div>
       <div style="font-size:12px;font-weight:700;color:${d.color};white-space:nowrap;width:110px;flex-shrink:0;">
-        ${pct.toFixed(1)}%&nbsp;&nbsp;${fmt(d.value)}
+        ${pct.toFixed(1)}%\u00a0\u00a0${fmt(d.value)}
       </div>
     </div>`;
   }).join('');
