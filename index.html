@@ -1249,12 +1249,23 @@ function confirmSaveSheets() {
     const snaps = loadSnaps().slice().sort((a,b)=>a.timestamp-b.timestamp);
     const now   = new Date().toLocaleString('ko-KR');
 
+    // 원 단위 숫자를 콤마 포함 텍스트로 변환 (##### 방지)
+    function wonFmt(n) {
+      return Math.round(n).toLocaleString('ko-KR') + '원';
+    }
+    // 소수점 가격 (USD/JPY)
+    function priceFmt(n, currency) {
+      if (currency === 'USD') return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      if (currency === 'JPY') return '¥' + n.toLocaleString('ja-JP', {minimumFractionDigits:0});
+      return Math.round(n).toLocaleString('ko-KR') + '원';
+    }
+
     function toCSV(rows) {
       return rows.map(r =>
         r.map(c => {
           const s = String(c ?? '');
-          return s.includes(',') || s.includes('"') || s.includes('\n')
-            ? `"${s.replace(/"/g,'""')}"` : s;
+          // 항상 따옴표로 감싸서 콤마·특수문자 안전하게 처리
+          return `"${s.replace(/"/g,'""')}"`;
         }).join(',')
       ).join('\n');
     }
@@ -1264,19 +1275,31 @@ function confirmSaveSheets() {
       [`저장시각: ${now}`],
       [],
       ['종목명','티커','구분','현재가','평균단가','통화','수량',
-       '투자원금(원)','평가금액(원)','평가손익(원)','수익률(%)','전일대비(%)'],
+       '투자원금','평가금액','평가손익','수익률(%)','전일대비(%)'],
       ...assets.map(a => {
         const ev=evKRW(a), c=costKRW(a), p=ev-c, r=c>0?(p/c)*100:0;
         const dayChg = a.prevPrice>0 ? ((a.currentPrice-a.prevPrice)/a.prevPrice)*100 : 0;
         return [
-          a.name, a.ticker, CAT_LABELS[a.category]||a.category,
-          a.currentPrice, a.avgPrice, a.currency, a.quantity,
-          Math.round(c), Math.round(ev), Math.round(p),
-          r.toFixed(2), dayChg.toFixed(2)
+          a.name,
+          a.ticker,
+          CAT_LABELS[a.category]||a.category,
+          priceFmt(a.currentPrice, a.currency),
+          priceFmt(a.avgPrice, a.currency),
+          a.currency,
+          a.quantity.toLocaleString('ko-KR'),
+          wonFmt(c),
+          wonFmt(ev),
+          (p>=0?'+':'') + wonFmt(p),
+          (r>=0?'+':'') + r.toFixed(2) + '%',
+          (dayChg>=0?'+':'') + dayChg.toFixed(2) + '%',
         ];
       }),
       [],
-      ['','','','','','','합계', Math.round(cost), Math.round(total), Math.round(pnl), rtn.toFixed(2),''],
+      ['','','','','','','합계',
+        wonFmt(cost), wonFmt(total),
+        (pnl>=0?'+':'') + wonFmt(pnl),
+        (rtn>=0?'+':'') + rtn.toFixed(2) + '%', ''
+      ],
     ];
 
     // ── 탭2: 카테고리 비중 ──
@@ -1285,38 +1308,46 @@ function confirmSaveSheets() {
     const catRows = [
       [`저장시각: ${now}`],
       [],
-      ['카테고리','평가금액(원)','비중(%)'],
+      ['카테고리','평가금액','비중(%)'],
       ...Object.entries(catMap)
         .sort((a,b)=>b[1]-a[1])
-        .map(([k,v])=>[DONUT_CAT_LABELS[k]||k, Math.round(v), ((v/total)*100).toFixed(2)]),
+        .map(([k,v])=>[
+          DONUT_CAT_LABELS[k]||k,
+          wonFmt(v),
+          ((v/total)*100).toFixed(2)+'%'
+        ]),
       [],
-      ['합계', Math.round(total), '100.00'],
+      ['합계', wonFmt(total), '100.00%'],
     ];
 
     // ── 탭3: 종목 비중 ──
     const assetBiasRows = [
       [`저장시각: ${now}`],
       [],
-      ['종목명','평가금액(원)','비중(%)'],
+      ['종목명','평가금액','비중(%)'],
       ...assets
         .map(a=>({name:a.name, ev:evKRW(a)}))
         .sort((a,b)=>b.ev-a.ev)
-        .map(a=>[a.name, Math.round(a.ev), ((a.ev/total)*100).toFixed(2)]),
+        .map(a=>[
+          a.name,
+          wonFmt(a.ev),
+          ((a.ev/total)*100).toFixed(2)+'%'
+        ]),
       [],
-      ['합계', Math.round(total), '100.00'],
+      ['합계', wonFmt(total), '100.00%'],
     ];
 
     // ── 탭4: 스냅샷 이력 ──
     const snapRows = [
-      ['저장시각','총평가금액(원)','전대비변화(원)','변화율(%)'],
+      ['저장시각','총평가금액','전대비변화','변화율(%)'],
       ...snaps.map((s,i) => {
         const prev = snaps[i-1];
-        const diff = prev ? s.totalValue - prev.totalValue : '';
-        const pct  = prev && prev.totalValue>0 ? ((diff/prev.totalValue)*100).toFixed(2) : '';
+        const diff = prev ? s.totalValue - prev.totalValue : null;
+        const pct  = prev && prev.totalValue>0 ? ((diff/prev.totalValue)*100).toFixed(2)+'%' : '';
         return [
           new Date(s.timestamp).toLocaleString('ko-KR'),
-          Math.round(s.totalValue),
-          diff !== '' ? Math.round(diff) : '',
+          wonFmt(s.totalValue),
+          diff !== null ? (diff>=0?'+':'') + wonFmt(diff) : '',
           pct
         ];
       }),
@@ -1330,31 +1361,32 @@ function confirmSaveSheets() {
       ['2. "이 CSV 데이터로 포트폴리오 대시보드를 원복해줘"라고 요청'],
       ['3. Claude가 자산목록 탭의 데이터를 읽어 index.html 재생성'],
       [],
-      ['=== 핵심 원복 데이터 (자산목록 탭 참고) ==='],
+      ['=== 핵심 원복 데이터 ==='],
       ['종목명','티커','통화','수량','평균단가'],
-      ...assets.map(a=>[a.name, a.ticker, a.currency, a.quantity, a.avgPrice]),
+      ...assets.map(a=>[
+        a.name, a.ticker, a.currency,
+        a.quantity,
+        priceFmt(a.avgPrice, a.currency)
+      ]),
     ];
 
-    // ── 전체 CSV 합치기 (섹션 구분) ──
-    const BOM = '\uFEFF'; // 한글 깨짐 방지
+    // ── 전체 CSV 합치기 ──
+    const BOM = '\uFEFF';
     const fullCSV = BOM + [
-      '===== 자산목록 =====',      toCSV(assetRows),      '',
-      '===== 카테고리비중 =====',  toCSV(catRows),        '',
-      '===== 종목비중 =====',      toCSV(assetBiasRows),  '',
-      '===== 스냅샷이력 =====',    toCSV(snapRows),       '',
-      '===== 원복가이드 =====',    toCSV(restoreRows),
+      '===== 자산목록 =====',     toCSV(assetRows),     '',
+      '===== 카테고리비중 =====', toCSV(catRows),       '',
+      '===== 종목비중 =====',     toCSV(assetBiasRows), '',
+      '===== 스냅샷이력 =====',   toCSV(snapRows),      '',
+      '===== 원복가이드 =====',   toCSV(restoreRows),
     ].join('\n');
 
     // ── 다운로드 ──
     const blob = new Blob([fullCSV], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `${fileName}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = `${fileName}.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
 
     statusEl.innerHTML = `✅ <b>${fileName}.csv</b> 다운로드 완료!<br>
       <span style="font-size:11px;color:#636366;">
