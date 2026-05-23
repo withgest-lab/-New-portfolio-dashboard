@@ -1533,8 +1533,8 @@ function drawLineChart() {
     const y1  = H - PAD.b + 13;
     const y2  = H - PAD.b + 25;
 
-    // 모든 레이블 오른쪽 정렬
-    ctx.textAlign = 'right';
+    // 첫 번째 → 왼쪽, 나머지 → 오른쪽 정렬
+    ctx.textAlign = i === 0 ? 'left' : 'right';
 
     if (['1D','1W','1M'].includes(currentPeriod)) {
       ctx.fillText(`${mo}/${dd}`, x, y1);
