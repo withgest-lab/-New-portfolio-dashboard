@@ -307,7 +307,7 @@
       <div class="section-label">카테고리 비중</div>
       <div style="display:flex;justify-content:center;">
         <div class="donut-canvas-wrap">
-          <canvas id="catDonut" width="360" height="360"></canvas>
+          <canvas id="catDonut" width="440" height="360"></canvas>
           <div class="donut-center">
             <div class="dc-label">총 자산</div>
             <div class="dc-val" id="catCenter">—</div>
@@ -327,7 +327,7 @@
   <div class="card">
     <div class="section-label">글로벌 시장 (시뮬레이션)</div>
     <div class="index-grid" id="indexGrid"></div>
-    <div class="notice">※ 지수는 시뮬레이션 값입니다. 30초마다 갱신됩니다.</div>
+    <div class="notice">※ 야후 파이낸스 기준 (15~20분 지연). 15분마다 자동 갱신됩니다.</div>
   </div>
 
   <!-- 6. 스냅샷 이력 -->
@@ -702,12 +702,11 @@ function drawDonutWithLabels(canvasId, data) {
   const ctx = cv.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
 
-  // 논리 크기 (CSS px) — 레이블 공간 충분히 확보
-  const LW = 360, LH = 360;
+  // 논리 크기 — 좌우 레이블 공간 충분히 확보
+  const LW = 440, LH = 360;
   const cx = LW/2, cy = LH/2;
   const OR = 108, IR = 64;
 
-  // 고해상도 렌더링
   cv.width  = Math.round(LW * dpr);
   cv.height = Math.round(LH * dpr);
   cv.style.width  = LW + 'px';
@@ -719,7 +718,7 @@ function drawDonutWithLabels(canvasId, data) {
   let angle = -Math.PI/2;
   const GAP = 0.022;
 
-  // ── 1패스: 세그먼트 그리기 ──
+  // ── 1패스: 세그먼트 ──
   data.forEach(d => {
     const sw = (d.value/total) * 2*Math.PI;
     ctx.beginPath();
@@ -735,27 +734,27 @@ function drawDonutWithLabels(canvasId, data) {
   ctx.beginPath(); ctx.arc(cx, cy, IR-2, 0, 2*Math.PI);
   ctx.fillStyle = '#ffffff'; ctx.fill();
 
-  // ── 2패스: 레이블 (인출선 + 텍스트) ──
+  // ── 2패스: 인출선 + 레이블 ──
   angle = -Math.PI/2;
   data.forEach(d => {
     const sw = (d.value/total) * 2*Math.PI;
-    if (sw > 0.22) {
-      const mid = angle + sw/2;
+    if (sw > 0.15) {
+      const mid  = angle + sw/2;
       const cosM = Math.cos(mid), sinM = Math.sin(mid);
+      const isRight = cosM >= 0;
 
-      // 인출선 시작(호 바깥)과 꺾임점
-      const r1 = OR + 8;
+      // 인출선: 호 바깥 → 꺾임점 → 수평선
+      const r1 = OR + 6;
       const r2 = OR + 22;
       const x1 = cx + cosM*r1, y1 = cy + sinM*r1;
       const x2 = cx + cosM*r2, y2 = cy + sinM*r2;
 
-      // 텍스트 방향에 따라 수평선 방향 결정
-      const isRight = cosM >= 0;
-      const lineLen = 16;
-      const x3 = x2 + (isRight ? lineLen : -lineLen);
+      // 수평선 길이: 세그먼트 작을수록 더 길게
+      const hLen = sw < 0.4 ? 28 : 18;
+      const x3 = x2 + (isRight ? hLen : -hLen);
       const y3 = y2;
 
-      // 인출선
+      // 인출선 그리기
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -764,21 +763,37 @@ function drawDonutWithLabels(canvasId, data) {
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
-      // 텍스트 위치 (수평선 끝에서 약간 이격)
-      const tx = x3 + (isRight ? 4 : -4);
+      // 텍스트 시작점
+      const PAD = 4;
+      let tx = x3 + (isRight ? PAD : -PAD);
       const ty = y3;
-      ctx.textAlign = isRight ? 'left' : 'right';
 
+      // 경계 보호: 텍스트가 캔버스 밖으로 나가지 않도록
       const pct    = ((d.value/total)*100).toFixed(1) + '%';
       const fmtVal = fmt(d.value);
+      ctx.font = `bold 13px Pretendard,-apple-system,sans-serif`;
+      const pctW = ctx.measureText(pct).width;
+      ctx.font = `11px Pretendard,-apple-system,sans-serif`;
+      const valW = ctx.measureText(fmtVal).width;
+      const maxW = Math.max(pctW, valW);
+
+      if (!isRight) {
+        // 왼쪽 정렬: tx - maxW >= 4
+        tx = Math.max(tx, maxW + 4);
+      } else {
+        // 오른쪽 정렬: tx + maxW <= LW - 4
+        tx = Math.min(tx, LW - maxW - 4);
+      }
+
+      ctx.textAlign = isRight ? 'left' : 'right';
 
       // % 텍스트
-      ctx.font = `bold ${13}px Pretendard,-apple-system,sans-serif`;
+      ctx.font = `bold 13px Pretendard,-apple-system,sans-serif`;
       ctx.fillStyle = '#1c1c1e';
       ctx.fillText(pct, tx, ty - 2);
 
       // 금액 텍스트
-      ctx.font = `${11}px Pretendard,-apple-system,sans-serif`;
+      ctx.font = `11px Pretendard,-apple-system,sans-serif`;
       ctx.fillStyle = '#636366';
       ctx.fillText(fmtVal, tx, ty + 13);
     }
@@ -837,31 +852,70 @@ function renderDonuts() {
 }
 
 /* ═══════════════════════════════════
-   글로벌 시장 (시뮬레이션)
+   글로벌 시장 (야후 파이낸스 실제 데이터)
+   순서: S&P500 / 나스닥100 / 코스피 / 코스닥 / 비트코인 / 달러 / 엔화
 ═══════════════════════════════════ */
-let indices=[
-  {sym:'SPX',    name:'S&P 500', val:5312.50,chg:0.82,dec:2},
-  {sym:'NASDAQ', name:'나스닥',  val:18432.20,chg:1.14,dec:2},
-  {sym:'DJI',    name:'다우존스',val:38928.40,chg:0.46,dec:2},
-  {sym:'KOSPI',  name:'코스피',  val:2758.80,chg:-0.32,dec:2},
-  {sym:'KOSDAQ', name:'코스닥',  val:882.50,chg:0.58,dec:2},
-  {sym:'N225',   name:'닛케이',  val:38450.00,chg:-0.21,dec:2},
-  {sym:'USD/KRW',name:'달러/원', val:1368.50,chg:0.15,dec:1},
-  {sym:'JPY/KRW',name:'엔/원',   val:9.14,chg:-0.08,dec:2},
+const INDEX_LIST = [
+  { sym:'^GSPC',    name:'S&P 500',   label:'S&P 500',  dec:2, unit:'' },
+  { sym:'^NDX',     name:'나스닥 100', label:'NASDAQ 100',dec:2, unit:'' },
+  { sym:'^KS11',    name:'코스피',     label:'KOSPI',    dec:2, unit:'' },
+  { sym:'^KQ11',    name:'코스닥',     label:'KOSDAQ',   dec:2, unit:'' },
+  { sym:'BTC-USD',  name:'비트코인',   label:'BTC/USD',  dec:0, unit:'$' },
+  { sym:'USDKRW=X', name:'달러/원',    label:'USD/KRW',  dec:1, unit:'₩' },
+  { sym:'JPYKRW=X', name:'엔/원',      label:'JPY/KRW',  dec:2, unit:'₩' },
 ];
+
+let indices = INDEX_LIST.map(i=>({...i, val:null, chg:null}));
+
 function renderIndices() {
-  document.getElementById('indexGrid').innerHTML=indices.map(idx=>`
+  document.getElementById('indexGrid').innerHTML = indices.map(idx=>`
     <div class="index-card">
-      <div class="index-name">${idx.sym}</div>
-      <div class="index-val ${updn(idx.chg)}">${idx.val.toFixed(idx.dec)}</div>
-      <div class="index-chg ${updn(idx.chg)}">${idx.chg>=0?'▲':'▼'} ${Math.abs(idx.chg).toFixed(2)}%</div>
+      <div class="index-name">${idx.label}</div>
+      <div class="index-val ${idx.val!=null?updn(idx.chg):''}" style="${idx.val==null?'color:#8e8e93':''}">${
+        idx.val != null
+          ? idx.unit + idx.val.toLocaleString('ko-KR', {minimumFractionDigits:idx.dec, maximumFractionDigits:idx.dec})
+          : '—'
+      }</div>
+      <div class="index-chg ${idx.chg!=null?updn(idx.chg):''}">${
+        idx.chg != null
+          ? (idx.chg>=0?'▲':'▼') + ' ' + Math.abs(idx.chg).toFixed(2)+'%'
+          : '조회 중...'
+      }</div>
     </div>`).join('');
 }
+
+async function fetchIndices() {
+  const results = await Promise.allSettled(
+    INDEX_LIST.map(async (item, i) => {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.sym)}?interval=1d&range=2d`;
+      const res = await fetch(YAHOO_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      const meta = json?.chart?.result?.[0]?.meta;
+      if (!meta) throw new Error('no meta');
+      const val  = meta.regularMarketPrice;
+      const prev = meta.chartPreviousClose || meta.previousClose || val;
+      const chg  = prev > 0 ? ((val - prev) / prev) * 100 : 0;
+      return { i, val, chg };
+    })
+  );
+  results.forEach(r => {
+    if (r.status === 'fulfilled') {
+      const { i, val, chg } = r.value;
+      indices[i].val = val;
+      indices[i].chg = Math.round(chg * 100) / 100;
+    }
+  });
+  renderIndices();
+}
+
+// 시뮬레이션 함수 — 실제 데이터 있을 때는 미세 변동만
 function simulateMarket() {
-  indices.forEach(idx=>{
-    const d=(Math.random()-.48)*0.3;
-    idx.chg=Math.round((idx.chg+d)*100)/100;
-    idx.val=Math.round(idx.val*(1+d/100)*1000)/1000;
+  indices.forEach(idx => {
+    if (idx.val == null) return;
+    const d = (Math.random() - 0.49) * 0.05;
+    idx.val  = Math.round(idx.val * (1 + d/100) * 1000) / 1000;
+    idx.chg  = Math.round((idx.chg + d * 0.1) * 100) / 100;
   });
   renderIndices();
 }
@@ -1370,8 +1424,12 @@ window.addEventListener('resize',()=>drawLineChart());
 
 (async function init(){
   renderAll(); renderSnaps(); renderIndices();
+  fetchIndices(); // 실제 지수 데이터 로드
   setStatus('ok','초기 데이터 로드 완료 — 🔄 버튼으로 최신 시세 갱신');
 })();
+
+// 지수 15분마다 자동 갱신
+setInterval(fetchIndices, 15*60*1000);
 </script>
 </body>
 </html>
