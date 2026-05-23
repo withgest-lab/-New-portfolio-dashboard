@@ -588,17 +588,28 @@ function fmt(n) {
 }
 function fmtPct(n) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
 function fmtX(ts) {
-  const d = new Date(ts);
+  const d  = new Date(ts);
+  const mo = d.getMonth() + 1;
+  const dd = d.getDate();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const date = `${mo}/${dd}`;
+  const time = `${hh}:${mm}`;
+
   if (currentPeriod === '1D') {
-    // 1D: HH:MM 시간만
-    return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    // 1D: 날짜+시간 모두 표시 "5/24 13:12"
+    return `${date} ${time}`;
   }
   if (['1W','1M'].includes(currentPeriod)) {
-    // 1W/1M: MM/DD
-    return String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0');
+    // 1W/1M: "5/24 13:12"
+    return `${date} ${time}`;
   }
-  // 3M 이상: YY/MM
-  return String(d.getFullYear()).slice(2)+'/'+String(d.getMonth()+1).padStart(2,'0');
+  if (['3M','6M','YTD'].includes(currentPeriod)) {
+    // 3M~YTD: "5/24"
+    return date;
+  }
+  // 1Y 이상: "24/05" (연/월)
+  return `${String(d.getFullYear()).slice(2)}/${String(mo).padStart(2,'0')}`;
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function updn(n) { return n >= 0 ? 'up' : 'dn'; }
@@ -1488,7 +1499,7 @@ function drawLineChart() {
   cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
   cv.style.width=W+'px'; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
-  const PAD={t:14,r:80,b:38,l:14};
+  const PAD={t:14,r:80,b:46,l:14};
   const gW=W-PAD.l-PAD.r, gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
   const lines=[];
