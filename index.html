@@ -744,7 +744,8 @@ document.addEventListener('click', e => {
     box.style.display = 'none';
   }
 });
-  const name   = document.getElementById('af_name').value.trim();
+
+function addAsset() {
   const ticker = document.getElementById('af_ticker').value.trim().toUpperCase();
   const cat    = document.getElementById('af_cat').value;
   const qty    = parseFloat(document.getElementById('af_qty').value);
