@@ -278,8 +278,17 @@
       </table>
     </div>
     <div class="add-form">
-      <label>종목명<input id="af_name" placeholder="" style="width:110px"></label>
-      <label>티커<input id="af_ticker" placeholder="" style="width:100px"></label>
+      <label style="position:relative;">종목명
+        <input id="af_name" placeholder="" style="width:140px" oninput="searchTicker(this.value)" autocomplete="off">
+        <div id="af_suggestions" style="
+          display:none; position:absolute; top:100%; left:0; z-index:200;
+          background:#fff; border:1px solid #e5e5ea; border-radius:10px;
+          box-shadow:0 4px 16px rgba(0,0,0,.12); min-width:260px; max-height:220px;
+          overflow-y:auto; margin-top:4px;">
+        </div>
+      </label>
+      <label>티커<input id="af_ticker" placeholder="" style="width:100px" readonly
+        style="background:var(--color-section-bg);cursor:default;"></label>
       <label>구분<select id="af_cat">
         <option value="">-- 선택 --</option>
         <option value="stock_kr">국내주식</option>
@@ -665,7 +674,76 @@ function delAsset(id) {
   if (!confirm('이 자산을 삭제할까요?')) return;
   assets = assets.filter(a=>a.id!==id); saveAssets(); renderAll();
 }
-function addAsset() {
+/* ═══════════════════════════════════
+   종목명 → 티커 자동완성 (야후 파이낸스)
+═══════════════════════════════════ */
+let searchTimer = null;
+
+async function searchTicker(query) {
+  const box  = document.getElementById('af_suggestions');
+  if (!query || query.length < 1) { box.style.display='none'; return; }
+
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    try {
+      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&lang=ko-KR&region=KR&quotesCount=8&newsCount=0&enableFuzzyQuery=true&quotesQueryId=tss_match_phrase_query`;
+      const res = await fetch(YAHOO_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      const quotes = json?.quotes || [];
+
+      if (!quotes.length) {
+        box.style.display = 'none'; return;
+      }
+
+      box.innerHTML = quotes.map(q => {
+        const sym      = q.symbol || '';
+        const name     = q.longname || q.shortname || sym;
+        const exchange = q.exchange || q.exchDisp || '';
+        const type     = q.quoteType || '';
+
+        // 구분·통화 자동 추론
+        let cat = 'stock_us', cur = 'USD';
+        if (sym.endsWith('.KS') || sym.endsWith('.KQ')) { cat='stock_kr'; cur='KRW'; }
+        else if (sym.endsWith('.T'))                    { cat='stock_jp'; cur='JPY'; }
+        else if (type === 'CRYPTOCURRENCY')             { cat='crypto';   cur='USD'; }
+
+        // 거래소 배지 색상
+        const badgeColor = cat==='stock_kr'?'#007aff': cat==='stock_jp'?'#30b0c7': cat==='crypto'?'#ff3b30':'#ff9500';
+
+        return `<div onclick="selectTicker('${sym}','${name.replace(/'/g,"\\'")}','${cat}','${cur}')"
+          style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f2f2f7;display:flex;gap:10px;align-items:center;"
+          onmouseover="this.style.background='#f2f2f7'" onmouseout="this.style.background='#fff'">
+          <span style="background:${badgeColor}20;color:${badgeColor};border-radius:5px;padding:2px 7px;font-size:10px;font-weight:700;flex-shrink:0;">${exchange||type}</span>
+          <span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+          <span style="font-size:11px;color:#8e8e93;flex-shrink:0;">${sym}</span>
+        </div>`;
+      }).join('');
+
+      box.style.display = 'block';
+    } catch(e) {
+      box.style.display = 'none';
+    }
+  }, 350); // 350ms 디바운스
+}
+
+function selectTicker(sym, name, cat, cur) {
+  document.getElementById('af_name').value   = name;
+  document.getElementById('af_ticker').value = sym;
+  document.getElementById('af_cat').value    = cat;
+  document.getElementById('af_cur').value    = cur;
+  document.getElementById('af_suggestions').style.display = 'none';
+  // 수량 입력칸으로 포커스 이동
+  document.getElementById('af_qty').focus();
+}
+
+// 바깥 클릭 시 드롭다운 닫기
+document.addEventListener('click', e => {
+  const box = document.getElementById('af_suggestions');
+  if (box && !box.contains(e.target) && e.target.id !== 'af_name') {
+    box.style.display = 'none';
+  }
+});
   const name   = document.getElementById('af_name').value.trim();
   const ticker = document.getElementById('af_ticker').value.trim().toUpperCase();
   const cat    = document.getElementById('af_cat').value;
