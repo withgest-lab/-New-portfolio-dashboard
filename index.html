@@ -1148,9 +1148,10 @@ function drawLineChart() {
   const gW=W-PAD.l-PAD.r, gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
   const lines=[];
-  if(showSum||selectedAssets.size===0)
+  if(showSum)
     lines.push({label:'합계',vals:chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+v,0)),color:'#1c1c1e',lw:2.5});
   assets.forEach((a,i)=>{ if(selectedAssets.has(a.id)) lines.push({label:a.name,vals:chartHistory.map(h=>h.byAsset[a.id]||0),color:LINE_COLS[i%LINE_COLS.length],lw:1.5}); });
+  if(!lines.length) return; // 선택된 항목 없으면 빈 차트
   const allVals=lines.flatMap(l=>l.vals);
   const minV=Math.min(...allVals)*0.995, maxV=Math.max(...allVals)*1.005, rng=maxV-minV||1;
   const toX=i=>PAD.l+(chartHistory.length>1?i/(chartHistory.length-1):0.5)*gW;
@@ -1177,7 +1178,11 @@ function drawLineChart() {
 }
 function renderStatBar() {
   const bar=document.getElementById('statBar');
-  const items=showSum?[null,...[...selectedAssets].slice(0,3)]:[[...selectedAssets].slice(0,3)].flat();
+  const items = [
+    ...(showSum ? [null] : []),
+    ...[...selectedAssets].slice(0, showSum ? 3 : 4)
+  ];
+  if(!items.length) { bar.innerHTML=''; return; }
   bar.innerHTML=items.slice(0,4).map(id=>{
     const a=id?assets.find(x=>x.id===id):null;
     const vals=chartHistory.map(h=>{
@@ -1216,10 +1221,9 @@ function toggleAll() {
 }
 
 /* ═══════════════════════════════════
-   구글 시트 저장
+   구글 시트 저장 (CSV 다운로드)
 ═══════════════════════════════════ */
 function saveToGoogleSheets() {
-  // 기본 파일명: 포트폴리오-백업-YYYY-MM-DD
   const today = new Date();
   const dateStr = today.getFullYear() + '-'
     + String(today.getMonth()+1).padStart(2,'0') + '-'
@@ -1232,71 +1236,19 @@ function closeSheetModal() {
   document.getElementById('sheetsModal').style.display = 'none';
 }
 
-async function confirmSaveSheets() {
+function confirmSaveSheets() {
   const fileName = document.getElementById('sheetsFileName').value.trim() || '포트폴리오-백업';
   const statusEl = document.getElementById('sheetsStatus');
   const saveBtn  = document.querySelector('#sheetsModal .btn-primary');
 
-  saveBtn.disabled = true;
-  saveBtn.textContent = '저장 중...';
-  statusEl.textContent = '⏳ 구글 드라이브에 저장 중...';
-
   try {
-    const total   = totalEv();
-    const cost    = assets.reduce((s,a)=>s+costKRW(a),0);
-    const pnl     = total - cost;
-    const rtn     = cost > 0 ? (pnl/cost)*100 : 0;
-    const snaps   = loadSnaps().slice().sort((a,b)=>a.timestamp-b.timestamp);
+    const total = totalEv();
+    const cost  = assets.reduce((s,a)=>s+costKRW(a),0);
+    const pnl   = total - cost;
+    const rtn   = cost > 0 ? (pnl/cost)*100 : 0;
+    const snaps = loadSnaps().slice().sort((a,b)=>a.timestamp-b.timestamp);
+    const now   = new Date().toLocaleString('ko-KR');
 
-    // ── 탭1: 자산목록 ──
-    const assetRows = [
-      ['종목명','티커','구분','현재가','평균단가','통화','수량','투자원금(원)','평가금액(원)','평가손익(원)','수익률(%)','전일대비(%)'],
-      ...assets.map(a => {
-        const ev=evKRW(a), c=costKRW(a), p=ev-c, r=c>0?(p/c)*100:0;
-        const dayChg=a.prevPrice>0?((a.currentPrice-a.prevPrice)/a.prevPrice)*100:0;
-        return [
-          a.name, a.ticker, CAT_LABELS[a.category]||a.category,
-          a.currentPrice, a.avgPrice, a.currency,
-          a.quantity, Math.round(c), Math.round(ev),
-          Math.round(p), r.toFixed(2), dayChg.toFixed(2)
-        ];
-      }),
-      [],
-      ['','','','','','','합계', Math.round(cost), Math.round(total), Math.round(pnl), rtn.toFixed(2), '']
-    ];
-
-    // ── 탭2: 카테고리 비중 ──
-    const catMap={};
-    assets.forEach(a=>{ const k=donutCatKey(a); catMap[k]=(catMap[k]||0)+evKRW(a); });
-    const catRows = [
-      ['카테고리','평가금액(원)','비중(%)'],
-      ...Object.entries(catMap)
-        .sort((a,b)=>b[1]-a[1])
-        .map(([k,v])=>[DONUT_CAT_LABELS[k]||k, Math.round(v), ((v/total)*100).toFixed(2)])
-    ];
-
-    // ── 탭3: 종목 비중 ──
-    const assetBiasRows = [
-      ['종목명','평가금액(원)','비중(%)'],
-      ...assets
-        .map(a=>({name:a.name, ev:evKRW(a)}))
-        .sort((a,b)=>b.ev-a.ev)
-        .map(a=>[a.name, Math.round(a.ev), ((a.ev/total)*100).toFixed(2)])
-    ];
-
-    // ── 탭4: 스냅샷 이력 ──
-    const snapRows = [
-      ['저장시각','총평가금액(원)','전대비변화(원)','변화율(%)'],
-      ...snaps.map((s,i)=>{
-        const prev = snaps[i-1];
-        const diff = prev ? s.totalValue-prev.totalValue : '';
-        const pct  = prev && prev.totalValue>0 ? ((diff/prev.totalValue)*100).toFixed(2) : '';
-        return [new Date(s.timestamp).toLocaleString('ko-KR'), Math.round(s.totalValue), diff!==''?Math.round(diff):'', pct];
-      })
-    ];
-
-    // ── CSV 형식으로 구글 드라이브에 저장 ──
-    // 각 탭을 별도 섹션으로 구분하여 하나의 CSV로 저장
     function toCSV(rows) {
       return rows.map(r =>
         r.map(c => {
@@ -1307,61 +1259,116 @@ async function confirmSaveSheets() {
       ).join('\n');
     }
 
-    const fullContent = [
-      '=== 자산목록 ===', toCSV(assetRows), '',
-      '=== 카테고리비중 ===', toCSV(catRows), '',
-      '=== 종목비중 ===', toCSV(assetBiasRows), '',
-      '=== 스냅샷이력 ===', toCSV(snapRows)
+    // ── 탭1: 자산목록 ──
+    const assetRows = [
+      [`저장시각: ${now}`],
+      [],
+      ['종목명','티커','구분','현재가','평균단가','통화','수량',
+       '투자원금(원)','평가금액(원)','평가손익(원)','수익률(%)','전일대비(%)'],
+      ...assets.map(a => {
+        const ev=evKRW(a), c=costKRW(a), p=ev-c, r=c>0?(p/c)*100:0;
+        const dayChg = a.prevPrice>0 ? ((a.currentPrice-a.prevPrice)/a.prevPrice)*100 : 0;
+        return [
+          a.name, a.ticker, CAT_LABELS[a.category]||a.category,
+          a.currentPrice, a.avgPrice, a.currency, a.quantity,
+          Math.round(c), Math.round(ev), Math.round(p),
+          r.toFixed(2), dayChg.toFixed(2)
+        ];
+      }),
+      [],
+      ['','','','','','','합계', Math.round(cost), Math.round(total), Math.round(pnl), rtn.toFixed(2),''],
+    ];
+
+    // ── 탭2: 카테고리 비중 ──
+    const catMap = {};
+    assets.forEach(a => { const k=donutCatKey(a); catMap[k]=(catMap[k]||0)+evKRW(a); });
+    const catRows = [
+      [`저장시각: ${now}`],
+      [],
+      ['카테고리','평가금액(원)','비중(%)'],
+      ...Object.entries(catMap)
+        .sort((a,b)=>b[1]-a[1])
+        .map(([k,v])=>[DONUT_CAT_LABELS[k]||k, Math.round(v), ((v/total)*100).toFixed(2)]),
+      [],
+      ['합계', Math.round(total), '100.00'],
+    ];
+
+    // ── 탭3: 종목 비중 ──
+    const assetBiasRows = [
+      [`저장시각: ${now}`],
+      [],
+      ['종목명','평가금액(원)','비중(%)'],
+      ...assets
+        .map(a=>({name:a.name, ev:evKRW(a)}))
+        .sort((a,b)=>b.ev-a.ev)
+        .map(a=>[a.name, Math.round(a.ev), ((a.ev/total)*100).toFixed(2)]),
+      [],
+      ['합계', Math.round(total), '100.00'],
+    ];
+
+    // ── 탭4: 스냅샷 이력 ──
+    const snapRows = [
+      ['저장시각','총평가금액(원)','전대비변화(원)','변화율(%)'],
+      ...snaps.map((s,i) => {
+        const prev = snaps[i-1];
+        const diff = prev ? s.totalValue - prev.totalValue : '';
+        const pct  = prev && prev.totalValue>0 ? ((diff/prev.totalValue)*100).toFixed(2) : '';
+        return [
+          new Date(s.timestamp).toLocaleString('ko-KR'),
+          Math.round(s.totalValue),
+          diff !== '' ? Math.round(diff) : '',
+          pct
+        ];
+      }),
+    ];
+
+    // ── 원복 가이드 ──
+    const restoreRows = [
+      ['=== 대시보드 원복 방법 ==='],
+      [],
+      ['1. Claude(claude.ai)에 이 CSV 파일을 업로드'],
+      ['2. "이 CSV 데이터로 포트폴리오 대시보드를 원복해줘"라고 요청'],
+      ['3. Claude가 자산목록 탭의 데이터를 읽어 index.html 재생성'],
+      [],
+      ['=== 핵심 원복 데이터 (자산목록 탭 참고) ==='],
+      ['종목명','티커','통화','수량','평균단가'],
+      ...assets.map(a=>[a.name, a.ticker, a.currency, a.quantity, a.avgPrice]),
+    ];
+
+    // ── 전체 CSV 합치기 (섹션 구분) ──
+    const BOM = '\uFEFF'; // 한글 깨짐 방지
+    const fullCSV = BOM + [
+      '===== 자산목록 =====',      toCSV(assetRows),      '',
+      '===== 카테고리비중 =====',  toCSV(catRows),        '',
+      '===== 종목비중 =====',      toCSV(assetBiasRows),  '',
+      '===== 스냅샷이력 =====',    toCSV(snapRows),       '',
+      '===== 원복가이드 =====',    toCSV(restoreRows),
     ].join('\n');
 
-    // Google Drive에 파일 저장 (Claude API → Google Drive MCP)
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        mcp_servers: [{
-          type: 'url',
-          url: 'https://drivemcp.googleapis.com/mcp/v1',
-          name: 'google-drive'
-        }],
-        messages: [{
-          role: 'user',
-          content: `구글 드라이브에 다음 CSV 데이터를 "${fileName}.csv" 파일로 저장해줘. 
-파일 내용:
-${fullContent}
+    // ── 다운로드 ──
+    const blob = new Blob([fullCSV], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${fileName}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 
-저장 완료되면 파일 ID와 링크를 알려줘. JSON으로만 응답: {"fileId":"...","link":"...","name":"..."}`
-        }]
-      })
-    });
-
-    const data = await response.json();
-    // 응답에서 텍스트 추출
-    const textBlocks = data.content?.filter(c=>c.type==='text').map(c=>c.text).join('');
-    let fileInfo = null;
-    try {
-      const jsonMatch = textBlocks.match(/\{[\s\S]*\}/);
-      if (jsonMatch) fileInfo = JSON.parse(jsonMatch[0]);
-    } catch(e) {}
-
-    if (fileInfo?.link) {
-      statusEl.innerHTML = `✅ 저장 완료! <a href="${fileInfo.link}" target="_blank" style="color:#007aff">구글 드라이브에서 열기 →</a>`;
-    } else if (textBlocks && textBlocks.includes('저장')) {
-      statusEl.textContent = '✅ 구글 드라이브에 저장 완료!';
-    } else {
-      statusEl.textContent = '✅ 저장 완료!';
-    }
+    statusEl.innerHTML = `✅ <b>${fileName}.csv</b> 다운로드 완료!<br>
+      <span style="font-size:11px;color:#636366;">
+        구글 드라이브 앱 → + 버튼 → 파일 업로드 → 다운로드된 CSV 선택
+      </span>`;
     saveBtn.textContent = '완료';
     setTimeout(() => {
       closeSheetModal();
       saveBtn.disabled = false;
       saveBtn.textContent = '저장';
-    }, 3000);
+    }, 4000);
 
   } catch(e) {
-    statusEl.textContent = '❌ 저장 실패: ' + e.message;
+    statusEl.textContent = '❌ 오류: ' + e.message;
     saveBtn.disabled = false;
     saveBtn.textContent = '저장';
   }
