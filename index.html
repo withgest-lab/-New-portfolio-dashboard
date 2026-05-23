@@ -556,7 +556,6 @@ function deleteSnap(id) { saveSnaps(loadSnaps().filter(s=>s.id!==id)); renderSna
 function clearSnaps() {
   if (!confirm('스냅샷 이력을 모두 삭제할까요?')) return;
   saveSnaps([]);
-  generateFakeSnaps();
   renderSnaps();
 }
 function generateFakeSnaps() {
@@ -1132,7 +1131,6 @@ setInterval(simulateMarket, 30000);
 window.addEventListener('resize',()=>drawLineChart());
 
 (async function init(){
-  if(loadSnaps().length===0) generateFakeSnaps();
   renderAll(); renderSnaps(); renderIndices();
   setStatus('ok','초기 데이터 로드 완료 — 🔄 버튼으로 최신 시세 갱신');
 })();
