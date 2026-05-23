@@ -255,9 +255,6 @@
     <div class="stat-bar" id="statBar"></div>
   </div>
 
-  <!-- 2. 전체 자산 현황 -->
-  <div class="summary-grid" id="summaryGrid"></div>
-
   <!-- 3. 자산 목록 -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -376,6 +373,9 @@
     <div class="index-grid" id="indexGrid"></div>
     <div class="notice">※ 야후 파이낸스 기준 (15~20분 지연). 15분마다 자동 갱신됩니다.</div>
   </div>
+
+  <!-- 5. 전체 자산 현황 -->
+  <div class="summary-grid" id="summaryGrid"></div>
 
   <!-- 6. 스냅샷 이력 -->
   <div class="card">
@@ -1499,7 +1499,7 @@ function drawLineChart() {
   cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
   cv.style.width=W+'px'; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
-  const PAD={t:14,r:80,b:46,l:14};
+  const PAD={t:14,r:80,b:52,l:14};
   const gW=W-PAD.l-PAD.r, gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
   const lines=[];
@@ -1517,10 +1517,34 @@ function drawLineChart() {
   // Y축 (오른쪽)
   ctx.fillStyle='#8e8e93';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='left';
   for(let r=0;r<=4;r++){const y=PAD.t+(r/4)*gH;ctx.fillText(fmt(maxV-(r/4)*rng),PAD.l+gW+5,y+4);}
-  // X축
-  ctx.textAlign='center';ctx.fillStyle='#8e8e93';
-  const xT=Math.min(6,chartHistory.length);
-  for(let i=0;i<xT;i++){const idx=Math.round(i/(xT-1)*(chartHistory.length-1));ctx.fillText(fmtX(chartHistory[idx].ts),toX(idx),H-PAD.b+14);}
+  // X축 — 날짜+시간 두 줄, 오른쪽 열 맞춤
+  ctx.fillStyle = '#8e8e93';
+  ctx.font = `10px Pretendard,-apple-system,sans-serif`;
+  const xT = Math.min(6, chartHistory.length);
+  for (let i = 0; i < xT; i++) {
+    const idx = Math.round(i / (xT-1) * (chartHistory.length-1));
+    const ts  = chartHistory[idx].ts;
+    const d   = new Date(ts);
+    const mo  = d.getMonth() + 1;
+    const dd  = d.getDate();
+    const hh  = String(d.getHours()).padStart(2, '0');
+    const mm  = String(d.getMinutes()).padStart(2, '0');
+    const x   = toX(idx);
+    const y1  = H - PAD.b + 13;
+    const y2  = H - PAD.b + 25;
+
+    // 모든 레이블 오른쪽 정렬
+    ctx.textAlign = 'right';
+
+    if (['1D','1W','1M'].includes(currentPeriod)) {
+      ctx.fillText(`${mo}/${dd}`, x, y1);
+      ctx.fillText(`${hh}:${mm}`, x, y2);
+    } else if (['3M','6M','YTD'].includes(currentPeriod)) {
+      ctx.fillText(`${mo}/${dd}`, x, y1);
+    } else {
+      ctx.fillText(`${String(d.getFullYear()).slice(2)}/${String(mo).padStart(2,'0')}`, x, y1);
+    }
+  }
   // 라인
   lines.forEach(line=>{
     ctx.beginPath();ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
