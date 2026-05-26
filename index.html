@@ -1461,8 +1461,8 @@ function buildSnapshotHistory(period) {
   const nowByAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(evKRW(a))]));
   const nowTotal   = totalEv();
 
-  if (!snaps.length) {
-    // 스냅샷 없으면 시작점=현재값, 끝점=현재값 (급등 방지)
+  if (!snaps.length && !beforeStart) {
+    // 스냅샷 전혀 없음 → 현재값 단일 포인트 (수평선)
     return [
       { ts: startTs,    byAsset: nowByAsset, total: nowTotal },
       { ts: Date.now(), byAsset: nowByAsset, total: nowTotal },
@@ -1504,20 +1504,26 @@ function setPeriod(p) {
 
 async function buildChartHistory() {
   if (currentPeriod === '1D') {
-    // 1D: 야후 인트라데이 실데이터
     chartHistory = [];
-    drawLineChart(); renderStatBar(); // 빈 차트 먼저 그림
-    const data = await fetch1DIntraday();
-    if (data && data.length >= 2) {
-      chartHistory = data;
-      intraday1DCache = data;
-    } else {
-      // 실패 시 스냅샷 fallback
-      chartHistory = buildSnapshotHistory('1D');
-      setStatus('err', '1D 인트라데이 실패 — 스냅샷으로 대체');
+    drawLineChart(); renderStatBar();
+
+    // 스냅샷 기반 1D 히스토리 먼저 구성
+    const snapHistory = buildSnapshotHistory('1D');
+    if (snapHistory.length >= 2) {
+      chartHistory = snapHistory;
+      drawLineChart(); renderStatBar();
     }
+
+    // 5분봉 인트라데이 시도 (성공 시 덮어씀)
+    try {
+      const data = await fetch1DIntraday();
+      if (data && data.length >= 3) {
+        chartHistory = data;
+        setStatus('ok', `1D 실시간 · ${new Date().toLocaleTimeString('ko-KR')}`);
+      }
+    } catch(e) {}
+
   } else {
-    // 1W~ALL: 스냅샷 기반
     chartHistory = buildSnapshotHistory(currentPeriod);
   }
   drawLineChart(); renderStatBar();
