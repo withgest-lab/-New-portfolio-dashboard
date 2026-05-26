@@ -658,7 +658,10 @@ function saveSnaps(arr) { localStorage.setItem(SNAP_KEY, JSON.stringify(arr)); }
 
 function saveSnap() {
   const snaps = loadSnaps();
-  snaps.push({ id:uid(), timestamp:Date.now(), totalValue:totalEv(), byAsset:Object.fromEntries(assets.map(a=>[a.id,evKRW(a)])) });
+  const byAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(evKRW(a))]));
+  const total   = Object.values(byAsset).reduce((s,v) => s+v, 0);
+  if (total < 1000000) return; // 시세 갱신 안 된 상태면 저장 안 함
+  snaps.push({ id:uid(), timestamp:Date.now(), totalValue:total, byAsset });
   if (snaps.length > 500) snaps.splice(0, snaps.length-500);
   saveSnaps(snaps);
   renderSnaps();
@@ -1450,36 +1453,45 @@ async function fetch1DDailyFallback(start) {
 function buildSnapshotHistory(period) {
   const start   = getPeriodStart(period);
   const startTs = start.getTime();
-  const snaps   = loadSnaps()
-    .filter(s => s.timestamp >= startTs && Object.keys(s.byAsset||{}).length > 0)
-    .sort((a,b) => a.timestamp - b.timestamp);
+
+  // byAsset 비어있어도 totalValue 있으면 사용
+  const allSnaps = loadSnaps().sort((a,b) => a.timestamp - b.timestamp);
+  const snaps = allSnaps.filter(s => s.timestamp >= startTs && s.totalValue > 0);
 
   const nowByAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(evKRW(a))]));
-  const nowTotal   = Object.values(nowByAsset).reduce((s,v) => s+v, 0);
+  const nowTotal   = totalEv();
 
   if (!snaps.length) {
-    // 스냅샷 없으면 원금 → 현재 2포인트
-    const costByAsset = Object.fromEntries(assets.map(a => [a.id, Math.round(costKRW(a))]));
+    // 스냅샷 없으면 시작점=현재값, 끝점=현재값 (급등 방지)
     return [
-      { ts: startTs,    byAsset: costByAsset },
-      { ts: Date.now(), byAsset: nowByAsset  },
+      { ts: startTs,    byAsset: nowByAsset, total: nowTotal },
+      { ts: Date.now(), byAsset: nowByAsset, total: nowTotal },
     ];
   }
 
-  // 시작점 보간
-  const beforeStart = loadSnaps()
-    .filter(s => s.timestamp < startTs && Object.keys(s.byAsset||{}).length > 0)
-    .sort((a,b) => b.timestamp - a.timestamp)[0];
-
-  const history = [];
-  if (beforeStart) {
-    history.push({ ts: startTs, byAsset: { ...beforeStart.byAsset } });
-  } else {
-    history.push({ ts: startTs, byAsset: { ...snaps[0].byAsset } });
+  // totalValue → byAsset 변환 헬퍼 (byAsset 비어있을 때)
+  function snapToByAsset(s) {
+    if (s.byAsset && Object.keys(s.byAsset).length > 0) return { ...s.byAsset };
+    // byAsset 없으면 현재 비중 유지한 채 totalValue로 스케일
+    const currentTotal = nowTotal || 1;
+    const scale = s.totalValue / currentTotal;
+    return Object.fromEntries(assets.map(a => [a.id, Math.round(evKRW(a) * scale)]));
   }
 
-  snaps.forEach(s => history.push({ ts: s.timestamp, byAsset: { ...s.byAsset } }));
-  history.push({ ts: Date.now(), byAsset: nowByAsset });
+  const history = [];
+
+  // 시작점: period 기준 직전 스냅샷 or 첫 스냅샷
+  const beforeStart = allSnaps.filter(s => s.timestamp < startTs && s.totalValue > 0)
+    .sort((a,b) => b.timestamp - a.timestamp)[0];
+
+  if (beforeStart) {
+    history.push({ ts: startTs, byAsset: snapToByAsset(beforeStart), total: beforeStart.totalValue });
+  } else {
+    history.push({ ts: startTs, byAsset: snapToByAsset(snaps[0]), total: snaps[0].totalValue });
+  }
+
+  snaps.forEach(s => history.push({ ts: s.timestamp, byAsset: snapToByAsset(s), total: s.totalValue }));
+  history.push({ ts: Date.now(), byAsset: nowByAsset, total: nowTotal });
 
   return history;
 }
