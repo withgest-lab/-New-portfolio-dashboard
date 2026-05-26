@@ -476,64 +476,91 @@ function saveAssets() { localStorage.setItem(ASSETS_KEY, JSON.stringify(assets))
    야후 파이낸스 시세 조회
    - cors-anywhere 프록시 사용
 /* ═══════════════════════════════════
-   야후 파이낸스 — 다중 프록시 시세 조회
+   시세 조회 — Claude API 웹검색 활용
+   GitHub Pages에서 CORS 없이 동작
 ═══════════════════════════════════ */
+
+// Claude API로 야후 파이낸스 웹검색 → 시세 파싱
+async function fetchPricesViaClaude(tickers) {
+  try {
+    const tickerList = tickers.map(t => t.ticker).join(', ');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: '당신은 주식 시세 조회 도우미입니다. 반드시 JSON만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.',
+        messages: [{
+          role: 'user',
+          content: `다음 티커들의 현재가와 전일종가를 야후 파이낸스에서 검색해서 아래 JSON 형식으로만 응답하세요:
+티커 목록: ${tickerList}
+
+응답 형식 (JSON만, 다른 텍스트 없이):
+{"results":[{"ticker":"AAPL","price":150.00,"prev":148.50},...],"fx":{"USDKRW":1370.0,"JPYKRW":9.15}}`
+        }]
+      })
+    });
+
+    if (!response.ok) throw new Error('API ' + response.status);
+    const data = await response.json();
+
+    // 텍스트 블록에서 JSON 추출
+    const texts = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
+    const match = texts.match(/\{[\s\S]*"results"[\s\S]*\}/);
+    if (!match) throw new Error('JSON 파싱 실패');
+    return JSON.parse(match[0]);
+  } catch(e) {
+    console.warn('Claude API 시세 조회 실패:', e.message);
+    return null;
+  }
+}
+
+// 직접 야후 파이낸스 프록시 시도 (fallback)
 const PROXIES = [
   'https://corsproxy.io/?',
   'https://api.allorigins.win/raw?url=',
   'https://thingproxy.freeboard.io/fetch/',
+  'https://proxy.cors.sh/',
 ];
 
 async function yahooFetch(url) {
   for (const proxy of PROXIES) {
     try {
       const res = await fetch(proxy + encodeURIComponent(url), {
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(6000),
+        headers: { 'x-requested-with': 'XMLHttpRequest' }
       });
       if (!res.ok) continue;
       const json = await res.json();
-      if (json?.chart?.result?.[0]) return json;
+      if (json?.chart?.result?.[0] || json?.quoteSummary) return json;
     } catch(e) { continue; }
   }
-  // 모든 프록시 실패 시 직접 호출 시도 (일부 환경에서 동작)
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (res.ok) return await res.json();
-  } catch(e) {}
   return null;
 }
 
 async function fetchYahoo(ticker) {
-  // v8 API 시도
   const urls = [
     `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
     `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
-    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=price`,
   ];
   for (const url of urls) {
     const json = await yahooFetch(url);
-    if (!json) continue;
-
-    // v8 응답 파싱
     const meta = json?.chart?.result?.[0]?.meta;
     if (meta?.regularMarketPrice) {
       return {
         price: meta.regularMarketPrice,
-        prev:  meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice,
-        ok: true
-      };
-    }
-    // v10 응답 파싱
-    const price = json?.quoteSummary?.result?.[0]?.price;
-    if (price?.regularMarketPrice?.raw) {
-      return {
-        price: price.regularMarketPrice.raw,
-        prev:  price.regularMarketPreviousClose?.raw || price.regularMarketPrice.raw,
+        prev: meta.chartPreviousClose || meta.regularMarketPrice,
         ok: true
       };
     }
   }
-  return { ok: false, error: 'all proxies failed' };
+  return { ok: false };
 }
 
 async function fetchFXRate(pair) {
@@ -556,50 +583,76 @@ async function fetchAllPrices() {
   setStatus('loading', '시세 조회 중...');
 
   try {
-    // 1. 환율 먼저
+    const targetAssets = assets.filter(a => a.ticker && a.ticker !== '—' && a.category !== 'cash');
+
+    // ── 방법 1: Claude API 웹검색 (가장 안정적) ──
+    setStatus('loading', 'Claude AI로 시세 조회 중...');
+    const claudeResult = await fetchPricesViaClaude(targetAssets);
+
+    if (claudeResult?.results?.length > 0) {
+      // 환율 업데이트
+      if (claudeResult.fx?.USDKRW) FX.USD = claudeResult.fx.USDKRW;
+      if (claudeResult.fx?.JPYKRW) FX.JPY = claudeResult.fx.JPYKRW;
+      saveFX();
+
+      // 종목 시세 업데이트
+      let ok = 0;
+      claudeResult.results.forEach(r => {
+        const a = assets.find(x => x.ticker.toUpperCase() === r.ticker.toUpperCase());
+        if (a && r.price) {
+          a.prevPrice    = r.prev || a.currentPrice;
+          a.currentPrice = r.price;
+          ok++;
+        }
+      });
+
+      saveAssets(); renderAll();
+      const now = new Date().toLocaleTimeString('ko-KR');
+      setStatus('ok', `Claude AI 갱신 완료 ${now} · ${ok}개 종목`);
+      isFetching = false;
+      return;
+    }
+
+    // ── 방법 2: 직접 프록시 (fallback) ──
+    setStatus('loading', '직접 시세 조회 중...');
     const [usd, jpy] = await Promise.all([
       fetchFXRate('USDKRW=X'),
       fetchFXRate('JPYKRW=X')
     ]);
     if (usd) FX.USD = usd;
     if (jpy) FX.JPY = jpy;
-    saveFX(); // 환율 localStorage 저장
+    saveFX();
 
-    // 2. 종목별 시세
     const results = await Promise.allSettled(
-      assets.filter(a => a.ticker && !['cash'].includes(a.category))
-            .map(async a => {
-              const r = await fetchYahoo(a.ticker);
-              return { id: a.id, ...r };
-            })
+      targetAssets.map(async a => {
+        const r = await fetchYahoo(a.ticker);
+        return { id: a.id, ...r };
+      })
     );
 
     let ok = 0, fail = 0;
     results.forEach(r => {
       if (r.status === 'fulfilled' && r.value.ok) {
         const a = assets.find(x => x.id === r.value.id);
-        if (a) {
-          a.prevPrice = r.value.prev;
-          a.currentPrice = r.value.price;
-          ok++;
-        }
+        if (a) { a.prevPrice = r.value.prev; a.currentPrice = r.value.price; ok++; }
       } else { fail++; }
     });
 
-    saveAssets();
-    renderAll();
+    saveAssets(); renderAll();
     const now = new Date().toLocaleTimeString('ko-KR');
-    if (fail === 0) {
-      setStatus('ok', `갱신 완료 ${now} (야후 파이낸스 15~20분 지연)`);
+    if (ok > 0) {
+      setStatus('ok', `갱신 완료 ${now} · ${ok}개 성공${fail > 0 ? ` / ${fail}개 실패` : ''}`);
     } else {
-      setStatus('err', `${ok}개 성공 / ${fail}개 실패 — ${now}`);
+      setStatus('err', `시세 조회 실패 ${now} — 네트워크를 확인해 주세요`);
     }
+
   } catch(e) {
-    setStatus('err', '조회 실패: ' + e.message);
+    setStatus('err', '조회 오류: ' + e.message);
   } finally {
     isFetching = false;
   }
 }
+
 
 /* ═══════════════════════════════════
    유틸
