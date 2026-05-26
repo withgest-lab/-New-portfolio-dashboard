@@ -727,20 +727,29 @@ let stocksLoaded = false;
 
 async function loadStocksCSV() {
   if (stocksLoaded) return;
-  try {
-    const res = await fetch('./stocks.csv', { cache: 'force-cache' });
-    if (!res.ok) throw new Error('CSV 로드 실패');
-    const text = await res.text();
-    const lines = text.trim().split('\n').slice(1); // 헤더 제외
-    STOCK_DB = lines.map(line => {
-      const [name, ticker, category, currency] = line.split(',').map(s => s.trim().replace(/^"|"$/g,''));
-      return { n: name, t: ticker, c: category, cur: currency };
-    }).filter(s => s.n && s.t);
-    stocksLoaded = true;
-  } catch(e) {
-    console.warn('stocks.csv 로드 실패, 내장 DB 사용');
-    stocksLoaded = true; // 실패해도 다시 시도 안 함
+  // 여러 경로 순서대로 시도
+  const paths = [
+    './stocks.csv',
+    'stocks.csv',
+    location.pathname.replace(/\/[^/]*$/, '/') + 'stocks.csv',
+  ];
+  for (const path of paths) {
+    try {
+      const res = await fetch(path, { cache: 'force-cache' });
+      if (!res.ok) continue;
+      const text = await res.text();
+      const lines = text.trim().split('\n').slice(1);
+      STOCK_DB = lines.map(line => {
+        const [name, ticker, category, currency] = line.split(',').map(s => s.trim().replace(/^"|"$/g,''));
+        return { n: name, t: ticker, c: category, cur: currency };
+      }).filter(s => s.n && s.t);
+      stocksLoaded = true;
+      console.log(`stocks.csv 로드 완료 (${path}): ${STOCK_DB.length}개`);
+      return;
+    } catch(e) { continue; }
   }
+  console.warn('stocks.csv 로드 실패, 내장 DB 사용');
+  stocksLoaded = true;
 }
 
 // 페이지 로드 시 미리 로드
@@ -1832,11 +1841,11 @@ setInterval(async () => {
   });
 }, 30000); // 30초마다 체크 (1분보다 촘촘하게)
 
-// 야후 파이낸스 15분마다 자동 갱신 + 1D 차트 갱신
+// 야후 파이낸스 5분마다 자동 갱신 + 1D 차트 갱신
 setInterval(async ()=>{
   await fetchAllPrices();
   if(currentPeriod==='1D') buildChartHistory();
-}, 15*60*1000);
+}, 5*60*1000);
 
 // 글로벌 지수 시뮬레이션 30초
 setInterval(simulateMarket, 30000);
@@ -1849,8 +1858,8 @@ window.addEventListener('resize',()=>drawLineChart());
   setStatus('ok','초기 데이터 로드 완료 — 🔄 버튼으로 최신 시세 갱신');
 })();
 
-// 지수 15분마다 자동 갱신
-setInterval(fetchIndices, 15*60*1000);
+// 지수 5분마다 자동 갱신
+setInterval(fetchIndices, 5*60*1000);
 </script>
 </body>
 </html>
