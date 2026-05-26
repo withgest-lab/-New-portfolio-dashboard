@@ -475,38 +475,71 @@ function saveAssets() { localStorage.setItem(ASSETS_KEY, JSON.stringify(assets))
 /* ═══════════════════════════════════
    야후 파이낸스 시세 조회
    - cors-anywhere 프록시 사용
-   - 실패 시 allorigins 프록시 fallback
+/* ═══════════════════════════════════
+   야후 파이낸스 — 다중 프록시 시세 조회
 ═══════════════════════════════════ */
-const YAHOO_PROXY = 'https://corsproxy.io/?';
+const PROXIES = [
+  'https://corsproxy.io/?',
+  'https://api.allorigins.win/raw?url=',
+  'https://thingproxy.freeboard.io/fetch/',
+];
+
+async function yahooFetch(url) {
+  for (const proxy of PROXIES) {
+    try {
+      const res = await fetch(proxy + encodeURIComponent(url), {
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      if (json?.chart?.result?.[0]) return json;
+    } catch(e) { continue; }
+  }
+  // 모든 프록시 실패 시 직접 호출 시도 (일부 환경에서 동작)
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (res.ok) return await res.json();
+  } catch(e) {}
+  return null;
+}
 
 async function fetchYahoo(ticker) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`;
-  try {
-    const res = await fetch(YAHOO_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
+  // v8 API 시도
+  const urls = [
+    `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
+    `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=price`,
+  ];
+  for (const url of urls) {
+    const json = await yahooFetch(url);
+    if (!json) continue;
+
+    // v8 응답 파싱
     const meta = json?.chart?.result?.[0]?.meta;
-    if (!meta) throw new Error('no meta');
-    return {
-      price: meta.regularMarketPrice,
-      prev:  meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice,
-      ok: true
-    };
-  } catch(e) {
-    return { ok: false, error: e.message };
+    if (meta?.regularMarketPrice) {
+      return {
+        price: meta.regularMarketPrice,
+        prev:  meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice,
+        ok: true
+      };
+    }
+    // v10 응답 파싱
+    const price = json?.quoteSummary?.result?.[0]?.price;
+    if (price?.regularMarketPrice?.raw) {
+      return {
+        price: price.regularMarketPrice.raw,
+        prev:  price.regularMarketPreviousClose?.raw || price.regularMarketPrice.raw,
+        ok: true
+      };
+    }
   }
+  return { ok: false, error: 'all proxies failed' };
 }
 
 async function fetchFXRate(pair) {
-  // pair: 'USDKRW=X' or 'JPYKRW=X'
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${pair}?interval=1d&range=1d`;
-  try {
-    const res = await fetch(YAHOO_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
-    const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return price || null;
-  } catch(e) { return null; }
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${pair}?interval=1d&range=5d`;
+  const json = await yahooFetch(url);
+  return json?.chart?.result?.[0]?.meta?.regularMarketPrice || null;
 }
 
 function setStatus(state, text) {
@@ -1207,9 +1240,7 @@ async function fetchIndices() {
   const results = await Promise.allSettled(
     INDEX_LIST.map(async (item, i) => {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.sym)}?interval=1d&range=2d`;
-      const res = await fetch(YAHOO_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const json = await res.json();
+      const json = await yahooFetch(url);
       const meta = json?.chart?.result?.[0]?.meta;
       if (!meta) throw new Error('no meta');
       const val  = meta.regularMarketPrice;
@@ -1307,30 +1338,12 @@ async function fetch1DIntraday() {
   const startTs  = Math.floor(start.getTime() / 1000);
   const endTs    = Math.floor(Date.now() / 1000);
 
-  // ── 프록시 목록 (순서대로 시도) ──
-  const PROXIES = [
-    'https://corsproxy.io/?',
-    'https://api.allorigins.win/raw?url=',
-    'https://cors-anywhere.herokuapp.com/',
-  ];
-
-  async function fetchWithProxy(url) {
-    for (const proxy of PROXIES) {
-      try {
-        const fullUrl = proxy + encodeURIComponent(url);
-        const res = await fetch(fullUrl, { signal: AbortSignal.timeout(8000) });
-        if (res.ok) return await res.json();
-      } catch(e) { continue; }
-    }
-    return null;
-  }
-
   // ── 종목별 5분봉 시도 ──
   const results = await Promise.allSettled(
     assets.map(async a => {
       if (a.ticker === '—') return { id: a.id, points: [] };
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${a.ticker}?interval=5m&range=2d`;
-      const json = await fetchWithProxy(url);
+      const json = await yahooFetch(url);
       const result = json?.chart?.result?.[0];
       if (!result) return { id: a.id, points: [] };
       const timestamps = result.timestamp || [];
@@ -1400,16 +1413,9 @@ async function fetch1DDailyFallback(start) {
     assets.map(async a => {
       if (a.ticker === '—') return { id: a.id, open: null };
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${a.ticker}?interval=1d&range=2d`;
-      for (const proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']) {
-        try {
-          const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(8000) });
-          if (!res.ok) continue;
-          const json = await res.json();
-          const meta = json?.chart?.result?.[0]?.meta;
-          return { id: a.id, open: meta?.chartPreviousClose || meta?.regularMarketPrice || null };
-        } catch(e) { continue; }
-      }
-      return { id: a.id, open: null };
+      const json = await yahooFetch(url);
+      const meta = json?.chart?.result?.[0]?.meta;
+      return { id: a.id, open: meta?.chartPreviousClose || meta?.regularMarketPrice || null };
     })
   );
 
