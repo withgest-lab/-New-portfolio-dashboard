@@ -546,27 +546,38 @@ async function yahooFetch(url) {
 
 async function fetchYahoo(ticker) {
   const urls = [
+    `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
     `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
   ];
   for (const url of urls) {
     const json = await yahooFetch(url);
+    if (!json) continue;
     const meta = json?.chart?.result?.[0]?.meta;
     if (meta?.regularMarketPrice) {
-      return {
-        price: meta.regularMarketPrice,
-        prev: meta.chartPreviousClose || meta.regularMarketPrice,
-        ok: true
-      };
+      const price = meta.regularMarketPrice;
+      // chartPreviousClose가 가장 정확한 전일 종가
+      const prev  = meta.chartPreviousClose
+                 || meta.previousClose
+                 || meta.regularMarketPreviousClose
+                 || price;
+      return { price, prev, ok: true };
     }
   }
   return { ok: false };
 }
 
 async function fetchFXRate(pair) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${pair}?interval=1d&range=5d`;
-  const json = await yahooFetch(url);
-  return json?.chart?.result?.[0]?.meta?.regularMarketPrice || null;
+  const urls = [
+    `https://query1.finance.yahoo.com/v8/finance/chart/${pair}?interval=1d&range=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${pair}?interval=1d&range=1d`,
+  ];
+  for (const url of urls) {
+    const json = await yahooFetch(url);
+    const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    if (price) return price;
+  }
+  return null;
 }
 
 function setStatus(state, text) {
@@ -585,44 +596,16 @@ async function fetchAllPrices() {
   try {
     const targetAssets = assets.filter(a => a.ticker && a.ticker !== '—' && a.category !== 'cash');
 
-    // ── 방법 1: Claude API 웹검색 (가장 안정적) ──
-    setStatus('loading', 'Claude AI로 시세 조회 중...');
-    const claudeResult = await fetchPricesViaClaude(targetAssets);
-
-    if (claudeResult?.results?.length > 0) {
-      // 환율 업데이트
-      if (claudeResult.fx?.USDKRW) FX.USD = claudeResult.fx.USDKRW;
-      if (claudeResult.fx?.JPYKRW) FX.JPY = claudeResult.fx.JPYKRW;
-      saveFX();
-
-      // 종목 시세 업데이트
-      let ok = 0;
-      claudeResult.results.forEach(r => {
-        const a = assets.find(x => x.ticker.toUpperCase() === r.ticker.toUpperCase());
-        if (a && r.price) {
-          a.prevPrice    = r.prev || a.currentPrice;
-          a.currentPrice = r.price;
-          ok++;
-        }
-      });
-
-      saveAssets(); renderAll();
-      const now = new Date().toLocaleTimeString('ko-KR');
-      setStatus('ok', `Claude AI 갱신 완료 ${now} · ${ok}개 종목`);
-      isFetching = false;
-      return;
-    }
-
-    // ── 방법 2: 직접 프록시 (fallback) ──
-    setStatus('loading', '직접 시세 조회 중...');
+    // ── 환율 조회 ──
     const [usd, jpy] = await Promise.all([
       fetchFXRate('USDKRW=X'),
       fetchFXRate('JPYKRW=X')
     ]);
-    if (usd) FX.USD = usd;
-    if (jpy) FX.JPY = jpy;
+    if (usd && usd > 100) FX.USD = usd;
+    if (jpy && jpy > 1)   FX.JPY = jpy;
     saveFX();
 
+    // ── 종목 시세 조회 ──
     const results = await Promise.allSettled(
       targetAssets.map(async a => {
         const r = await fetchYahoo(a.ticker);
@@ -634,20 +617,44 @@ async function fetchAllPrices() {
     results.forEach(r => {
       if (r.status === 'fulfilled' && r.value.ok) {
         const a = assets.find(x => x.id === r.value.id);
-        if (a) { a.prevPrice = r.value.prev; a.currentPrice = r.value.price; ok++; }
+        if (a) {
+          a.prevPrice    = r.value.prev;
+          a.currentPrice = r.value.price;
+          ok++;
+        }
       } else { fail++; }
     });
 
-    saveAssets(); renderAll();
+    // 프록시 전부 실패 시 Claude API 시도
+    if (ok === 0) {
+      setStatus('loading', 'Claude AI로 시세 재시도 중...');
+      const claudeResult = await fetchPricesViaClaude(targetAssets);
+      if (claudeResult?.results?.length > 0) {
+        if (claudeResult.fx?.USDKRW > 100) FX.USD = claudeResult.fx.USDKRW;
+        if (claudeResult.fx?.JPYKRW > 1)   FX.JPY = claudeResult.fx.JPYKRW;
+        saveFX();
+        claudeResult.results.forEach(r => {
+          const a = assets.find(x => x.ticker.toUpperCase() === r.ticker.toUpperCase());
+          if (a && r.price) {
+            a.prevPrice    = r.prev || a.currentPrice;
+            a.currentPrice = r.price;
+            ok++;
+          }
+        });
+      }
+    }
+
+    saveAssets();
+    renderAll();
     const now = new Date().toLocaleTimeString('ko-KR');
     if (ok > 0) {
-      setStatus('ok', `갱신 완료 ${now} · ${ok}개 성공${fail > 0 ? ` / ${fail}개 실패` : ''}`);
+      setStatus('ok', `갱신 완료 ${now} · ${ok}개 업데이트 (15~20분 지연)`);
     } else {
-      setStatus('err', `시세 조회 실패 ${now} — 네트워크를 확인해 주세요`);
+      setStatus('err', `시세 조회 실패 — WiFi 차단 환경일 수 있습니다. LTE로 시도해보세요`);
     }
 
   } catch(e) {
-    setStatus('err', '조회 오류: ' + e.message);
+    setStatus('err', '오류: ' + e.message);
   } finally {
     isFetching = false;
   }
