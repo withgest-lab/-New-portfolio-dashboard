@@ -1014,33 +1014,25 @@ async function fetchIndices(){
 /* ════════════════════════════════════════
    라인 차트
 ════════════════════════════════════════ */
-// 선택 상태를 localStorage에서 복원
+/* ── 그래프 선택 상태 저장/복원 ── */
 const CHART_SEL_KEY = 'pf_chart_sel_v1';
 function loadChartSel(){
   try{
     const s = JSON.parse(localStorage.getItem(CHART_SEL_KEY));
-    if(s){
-      showSum = s.showSum !== undefined ? s.showSum : true;
-      return new Set(s.selected || []);
-    }
+    if(s) return { sel: new Set(s.selected||[]), sum: s.showSum!==undefined ? s.showSum : true };
   }catch(e){}
-  return new Set();
+  return { sel: new Set(), sum: true };
 }
 function saveChartSel(){
   localStorage.setItem(CHART_SEL_KEY, JSON.stringify({
-    showSum,
-    selected: [...selectedAssets]
+    showSum, selected:[...selectedAssets]
   }));
 }
-
-let currentPeriod='1D', chartHistory=[], selectedAssets=loadChartSel(), showSum=true;
-// showSum은 loadChartSel 안에서 설정됨 — 위 선언을 덮어쓰지 않도록
-(()=>{
-  try{
-    const s=JSON.parse(localStorage.getItem(CHART_SEL_KEY));
-    if(s&&s.showSum!==undefined) showSum=s.showSum;
-  }catch(e){}
-})();
+const _chartSel = loadChartSel();
+let currentPeriod = '1D';
+let chartHistory  = [];
+let selectedAssets = _chartSel.sel;
+let showSum        = _chartSel.sum;
 
 function getPeriodStart(period){
   const now=new Date();
