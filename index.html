@@ -484,7 +484,10 @@ async function fetchAllPrices(){
     });
     saveAssets();renderAll();
     const t=new Date().toLocaleTimeString('ko-KR');
-    if(ok>0){setStatus('ok',`갱신 완료 ${t} · ${ok}개`);}
+    if(ok>0){
+      setStatus('ok',`갱신 완료 ${t} · ${ok}개`);
+      saveSnap(); // 성공 시 스냅샷 저장 → 그래프 포인트 축적
+    }
     else{setStatus('err','시세 조회 실패 — LTE로 시도하세요');}
   }catch(e){setStatus('err','오류: '+e.message);}
   finally{isFetching=false;}
@@ -1020,20 +1023,10 @@ function setPeriod(p){
 }
 
 async function buildChartHistory(){
-  if(currentPeriod==='1D'){
-    chartHistory=buildSnapshotHistory('1D');
-    drawLineChart();renderStatBar();
-    try{
-      const data=await fetch1DIntraday();
-      if(data&&data.length>=3){
-        chartHistory=data;
-        setStatus('ok',`1D 실시간 · ${new Date().toLocaleTimeString('ko-KR')}`);
-      }
-    }catch(e){}
-  }else{
-    chartHistory=buildSnapshotHistory(currentPeriod);
-  }
-  drawLineChart();renderStatBar();
+  // 모든 기간 스냅샷 기반으로 통일 (인트라데이 혼용 제거)
+  chartHistory = buildSnapshotHistory(currentPeriod);
+  drawLineChart();
+  renderStatBar();
 }
 
 function drawLineChart(){
