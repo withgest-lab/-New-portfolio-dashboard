@@ -839,11 +839,26 @@ function renderSummary(){
   const pnl  = ev - cost;
   const rtn  = cost > 0 ? (pnl/cost)*100 : 0;
 
-  // 오늘 손익 = 전일 종가 기준 (prevPrice) → 가장 정확
-  // 전일 평가금액: 각 종목의 prevPrice × 수량 × 환율
-  const prevEv = assets.reduce((s,a) => s + toKRW(a, a.prevPrice) * a.quantity, 0);
-  const todayPnl = ev - prevEv;
-  const todayPct = prevEv > 0 ? (todayPnl / prevEv) * 100 : 0;
+  // 오늘 손익 = 1D 시작점(전일 22:30) 스냅샷 기준
+  // → 어제 미국장 + 오늘 한국장 변동 모두 반영
+  const oneDStart = getPeriodStart('1D').getTime();
+  const allSnaps  = loadSnaps().sort((a,b) => a.timestamp - b.timestamp);
+
+  // 22:30 직전 스냅샷 or 22:30 이후 첫 스냅샷
+  const baseSnap =
+    allSnaps.filter(s => s.timestamp <= oneDStart).slice(-1)[0] ||
+    allSnaps.filter(s => s.timestamp >  oneDStart)[0];
+
+  let todayPnl = 0, todayPct = 0;
+  if(baseSnap && baseSnap.totalValue > 0){
+    todayPnl = ev - baseSnap.totalValue;
+    todayPct = (todayPnl / baseSnap.totalValue) * 100;
+  } else {
+    // 스냅샷 없으면 prevPrice 기준으로 fallback
+    const prevEv = assets.reduce((s,a) => s + toKRW(a, a.prevPrice) * a.quantity, 0);
+    todayPnl = ev - prevEv;
+    todayPct = prevEv > 0 ? (todayPnl / prevEv) * 100 : 0;
+  }
 
   document.getElementById('summaryGrid').innerHTML=[
     {lbl:'총 평가금액',  val:fmt(ev),                                    sub:'',             cls:''},
