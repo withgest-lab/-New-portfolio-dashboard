@@ -150,19 +150,24 @@ tr:hover td{background:var(--color-section-bg);}
 .modal-box{background:#fff;border-radius:16px;padding:24px;max-width:360px;width:90%;margin:0 auto;}
 
 /* ── 반응형 ── */
+/* ── Z Fold7 펼침 (메인화면 ~904px) ── */
+@media(min-width:600px)and(max-width:960px){
+  .summary-grid{grid-template-columns:repeat(4,1fr);}
+  table{font-size:11px;}
+  th,td{padding:7px 5px;}
+}
+/* ── Z Fold7 접힘 / 일반 모바일 (~390px) ── */
 @media(max-width:480px){
   .summary-grid{grid-template-columns:repeat(2,1fr);}
   .col-hide{display:none;}
   .topbar-actions .status-wrap span{display:none;}
   .biased-wrap{flex-direction:column;}
   .bar-side{min-width:unset;width:100%;}
-  .index-grid{grid-template-columns:repeat(4,1fr);}
+  .index-grid{grid-template-columns:repeat(3,1fr);}
   .add-form{flex-direction:column;align-items:stretch;}
-  table{font-size:11px;}
-  th,td{padding:6px 4px;}
-}
-@media(min-width:600px)and(max-width:960px){
-  .summary-grid{grid-template-columns:repeat(4,1fr);}
+  table{font-size:10px;}
+  th,td{padding:5px 3px;white-space:nowrap;}
+  .tbl-wrap{overflow-x:auto;}
 }
 </style>
 </head>
@@ -1284,18 +1289,35 @@ function confirmSaveSheets(){
 ════════════════════════════════════════ */
 const AUTO_SNAP_TIMES = Array.from({length:24}, (_,h) => ({h, m:0}));
 // 매시 정각 자동 저장 (하루 24회)
-const snapFiredDate={};
-AUTO_SNAP_TIMES.forEach(t=>{snapFiredDate[`${t.h}:${t.m}`]='';});
+// snapFiredDate를 localStorage에 저장 → 페이지 새로고침 후에도 중복 저장 방지
+
+function getSnapFiredKey(h, m) {
+  return `snap_fired_${new Date().toDateString()}_${h}_${m}`;
+}
+function wasSnapFired(h, m) {
+  return localStorage.getItem(getSnapFiredKey(h, m)) === '1';
+}
+function markSnapFired(h, m) {
+  localStorage.setItem(getSnapFiredKey(h, m), '1');
+  // 오래된 fired 기록 정리 (3일 이상된 것 삭제)
+  const keys = Object.keys(localStorage).filter(k => k.startsWith('snap_fired_'));
+  const today = new Date().toDateString();
+  keys.forEach(k => { if(!k.includes(today)) localStorage.removeItem(k); });
+}
+
 setInterval(async()=>{
-  const now=new Date();const ds=now.toDateString();const h=now.getHours(),m=now.getMinutes();
+  const now = new Date();
+  const h = now.getHours();
+  const m = now.getMinutes();
   AUTO_SNAP_TIMES.forEach(t=>{
-    const key=`${t.h}:${t.m}`;
-    if(h===t.h&&m===t.m&&snapFiredDate[key]!==ds){
-      snapFiredDate[key]=ds;
-      fetchAllPrices(true); // ← 시장 사이클: 스냅샷 저장 O
+    // 정각 ±1분 이내면 저장 (30초 체크 주기로 놓치지 않도록)
+    const diffMin = (h * 60 + m) - (t.h * 60 + t.m);
+    if(Math.abs(diffMin) <= 1 && !wasSnapFired(t.h, t.m)){
+      markSnapFired(t.h, t.m);
+      fetchAllPrices(true); // 시세 갱신 + 스냅샷 저장
     }
   });
-},30000);
+}, 30000);
 
 /* ════════════════════════════════════════
    전체 렌더
