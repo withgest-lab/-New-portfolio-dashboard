@@ -158,6 +158,8 @@ tr:hover td{background:var(--color-section-bg);}
   .bar-side{min-width:unset;width:100%;}
   .index-grid{grid-template-columns:repeat(4,1fr);}
   .add-form{flex-direction:column;align-items:stretch;}
+  table{font-size:11px;}
+  th,td{padding:6px 4px;}
 }
 @media(min-width:600px)and(max-width:960px){
   .summary-grid{grid-template-columns:repeat(4,1fr);}
@@ -214,7 +216,7 @@ tr:hover td{background:var(--color-section-bg);}
     <table>
       <thead><tr>
         <th>종목</th><th>구분</th><th>현재가</th><th>전일比</th>
-        <th class="col-hide">평균단가</th><th>수량</th>
+        <th class="col-hide">평균단가</th><th class="col-hide">수량</th>
         <th class="col-hide">투자원금</th><th>평가금액</th>
         <th>평가손익</th><th>수익률</th><th>편집</th>
       </tr></thead>
@@ -619,16 +621,19 @@ function renderTable(){
       return '₩'+Math.round(p).toLocaleString('ko-KR');
     };
     let rows=`<tr>
-      <td><span style="font-weight:700">${a.name}</span><span class="ticker-badge">${a.ticker}</span></td>
+      <td>
+        <div style="font-weight:700;font-size:13px;">${a.name}</div>
+        <div style="font-size:10px;color:var(--color-tertiary);margin-top:1px;">${a.ticker}</div>
+      </td>
       <td><span class="cat-badge" style="background:${cc}20;color:${cc}">${tableBadge(a)}</span></td>
-      <td>${priceStr(a.currentPrice)}</td>
-      <td class="${updn(dayChg)}">${fmtPct(dayChg)}</td>
-      <td class="col-hide">${priceStr(a.avgPrice)}</td>
-      <td>${a.quantity.toLocaleString()}</td>
-      <td class="col-hide">${fmt(cost)}</td>
-      <td>${fmt(ev)}</td>
-      <td class="${updn(pnl)}">${pnl>=0?'+':''}${fmt(pnl)}</td>
-      <td class="${updn(rtn)}">${fmtPct(rtn)}</td>
+      <td style="font-size:12px;">${priceStr(a.currentPrice)}</td>
+      <td class="${updn(dayChg)}" style="font-size:12px;">${fmtPct(dayChg)}</td>
+      <td class="col-hide" style="font-size:12px;">${priceStr(a.avgPrice)}</td>
+      <td class="col-hide" style="font-size:12px;">${a.quantity.toLocaleString()}</td>
+      <td class="col-hide" style="font-size:12px;">${fmt(cost)}</td>
+      <td style="font-size:12px;">${fmt(ev)}</td>
+      <td class="${updn(pnl)}" style="font-size:12px;">${pnl>=0?'+':''}${fmt(pnl)}</td>
+      <td class="${updn(rtn)}" style="font-size:12px;font-weight:700;">${fmtPct(rtn)}</td>
       <td>
         <button class="edit-btn" onclick="toggleEdit('${a.id}')">✏️</button>
         <button class="del-btn" onclick="delAsset('${a.id}')">🗑</button>
