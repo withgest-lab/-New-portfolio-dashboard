@@ -1014,7 +1014,33 @@ async function fetchIndices(){
 /* ════════════════════════════════════════
    라인 차트
 ════════════════════════════════════════ */
-let currentPeriod='1D',chartHistory=[],selectedAssets=new Set(),showSum=true;
+// 선택 상태를 localStorage에서 복원
+const CHART_SEL_KEY = 'pf_chart_sel_v1';
+function loadChartSel(){
+  try{
+    const s = JSON.parse(localStorage.getItem(CHART_SEL_KEY));
+    if(s){
+      showSum = s.showSum !== undefined ? s.showSum : true;
+      return new Set(s.selected || []);
+    }
+  }catch(e){}
+  return new Set();
+}
+function saveChartSel(){
+  localStorage.setItem(CHART_SEL_KEY, JSON.stringify({
+    showSum,
+    selected: [...selectedAssets]
+  }));
+}
+
+let currentPeriod='1D', chartHistory=[], selectedAssets=loadChartSel(), showSum=true;
+// showSum은 loadChartSel 안에서 설정됨 — 위 선언을 덮어쓰지 않도록
+(()=>{
+  try{
+    const s=JSON.parse(localStorage.getItem(CHART_SEL_KEY));
+    if(s&&s.showSum!==undefined) showSum=s.showSum;
+  }catch(e){}
+})();
 
 function getPeriodStart(period){
   const now=new Date();
@@ -1204,11 +1230,20 @@ function renderToggles(){
       style="background:${LINE_COLS[i%LINE_COLS.length]}22;color:${LINE_COLS[i%LINE_COLS.length]};${selectedAssets.has(a.id)?`outline:2px solid ${LINE_COLS[i%LINE_COLS.length]};outline-offset:-2px`:''}"
       onclick="toggleAsset('${a.id}')">${a.name}</button>`).join('');
 }
-function toggleAsset(id){selectedAssets.has(id)?selectedAssets.delete(id):selectedAssets.add(id);renderToggles();drawLineChart();renderStatBar();}
-function toggleSum(){showSum=!showSum;renderToggles();drawLineChart();renderStatBar();}
+function toggleAsset(id){
+  selectedAssets.has(id)?selectedAssets.delete(id):selectedAssets.add(id);
+  saveChartSel();
+  renderToggles();drawLineChart();renderStatBar();
+}
+function toggleSum(){
+  showSum=!showSum;
+  saveChartSel();
+  renderToggles();drawLineChart();renderStatBar();
+}
 function toggleAll(){
   const all=assets.every(a=>selectedAssets.has(a.id));
   all?selectedAssets.clear():assets.forEach(a=>selectedAssets.add(a.id));
+  saveChartSel();
   renderToggles();drawLineChart();renderStatBar();
 }
 
