@@ -173,7 +173,7 @@ tr:hover td{background:var(--color-section-bg);}
       <div class="dot" id="statusDot"></div>
       <span id="statusText">준비 중...</span>
     </div>
-    <button class="btn btn-green" onclick="fetchAllPrices()">🔄 시세 갱신</button>
+    <button class="btn btn-green" onclick="fetchAllPrices(false)">🔄 시세 갱신</button>
     <button class="btn btn-primary" onclick="saveSnap()">📸 스냅샷</button>
     <button class="btn btn-sheets" onclick="openSheetsModal()">📤 구글 시트</button>
   </div>
@@ -386,7 +386,7 @@ function loadFX(){
     const s=JSON.parse(localStorage.getItem(FX_KEY));
     if(s&&s.USD>1000&&s.USD<2000&&s.JPY>5&&s.JPY<20) return s;
   }catch(e){}
-  return {USD:1368.5,JPY:9.14};
+  return {USD:1498.0,JPY:9.40};
 }
 function saveFX(){localStorage.setItem(FX_KEY,JSON.stringify(FX));}
 let FX = loadFX();
@@ -463,7 +463,7 @@ function setStatus(state,text){
 }
 
 let isFetching=false;
-async function fetchAllPrices(){
+async function fetchAllPrices(saveSnapshot=false){
   if(isFetching) return;
   isFetching=true;
   setStatus('loading','시세 조회 중...');
@@ -486,7 +486,7 @@ async function fetchAllPrices(){
     const t=new Date().toLocaleTimeString('ko-KR');
     if(ok>0){
       setStatus('ok',`갱신 완료 ${t} · ${ok}개`);
-      saveSnap(); // 성공 시 스냅샷 저장 → 그래프 포인트 축적
+      if(saveSnapshot) saveSnap(); // 명시적으로 요청된 경우에만 저장
     }
     else{setStatus('err','시세 조회 실패 — LTE로 시도하세요');}
   }catch(e){setStatus('err','오류: '+e.message);}
@@ -789,16 +789,22 @@ function sellAsset(){
    요약 카드
 ════════════════════════════════════════ */
 function renderSummary(){
-  const ev=totalEv(),cost=assets.reduce((s,a)=>s+costKRW(a),0);
-  const pnl=ev-cost,rtn=cost>0?(pnl/cost)*100:0;
-  const snaps=loadSnaps().slice().sort((a,b)=>b.timestamp-a.timestamp);
-  let todayPnl=0,todayPct=0;
-  if(snaps.length){const pv=snaps[0].totalValue;todayPnl=ev-pv;todayPct=pv>0?(todayPnl/pv)*100:0;}
+  const ev   = totalEv();
+  const cost = assets.reduce((s,a)=>s+costKRW(a), 0);
+  const pnl  = ev - cost;
+  const rtn  = cost > 0 ? (pnl/cost)*100 : 0;
+
+  // 오늘 손익 = 전일 종가 기준 (prevPrice) → 가장 정확
+  // 전일 평가금액: 각 종목의 prevPrice × 수량 × 환율
+  const prevEv = assets.reduce((s,a) => s + toKRW(a, a.prevPrice) * a.quantity, 0);
+  const todayPnl = ev - prevEv;
+  const todayPct = prevEv > 0 ? (todayPnl / prevEv) * 100 : 0;
+
   document.getElementById('summaryGrid').innerHTML=[
-    {lbl:'총 평가금액',val:fmt(ev),sub:''},
-    {lbl:'오늘 손익',val:(todayPnl>=0?'+':'')+fmt(todayPnl),sub:fmtPct(todayPct),cls:updn(todayPnl)},
-    {lbl:'총 평가손익',val:(pnl>=0?'+':'')+fmt(pnl),sub:'원금 '+fmt(cost),cls:updn(pnl)},
-    {lbl:'수익률',val:fmtPct(rtn),sub:'',cls:updn(rtn)},
+    {lbl:'총 평가금액',  val:fmt(ev),                                    sub:'',             cls:''},
+    {lbl:'오늘 손익',    val:(todayPnl>=0?'+':'')+fmt(todayPnl),         sub:fmtPct(todayPct), cls:updn(todayPnl)},
+    {lbl:'총 평가손익',  val:(pnl>=0?'+':'')+fmt(pnl),                   sub:'원금 '+fmt(cost),cls:updn(pnl)},
+    {lbl:'수익률',       val:fmtPct(rtn),                                sub:'',             cls:updn(rtn)},
   ].map(c=>`<div class="sum-card">
     <div class="sum-lbl">${c.lbl}</div>
     <div class="sum-val ${c.cls||''}">${c.val}</div>
@@ -1213,7 +1219,7 @@ setInterval(async()=>{
     const key=`${t.h}:${t.m}`;
     if(h===t.h&&m===t.m&&snapFiredDate[key]!==ds){
       snapFiredDate[key]=ds;
-      fetchAllPrices().then(()=>{saveSnap();});
+      fetchAllPrices(true); // ← 시장 사이클: 스냅샷 저장 O
     }
   });
 },30000);
@@ -1234,7 +1240,7 @@ window.addEventListener('resize',()=>drawLineChart());
 (async function init(){
   renderAll();renderSnaps();renderIndices();
   fetchIndices();
-  fetchAllPrices().then(()=>{
+  fetchAllPrices(false).then(()=>{  // 초기 로드: 스냅샷 저장 X
     // 이상 스냅샷 정리 (현재 총자산 대비 30%~300% 벗어나는 것 제거)
     const current=totalEv();
     if(current>1000000){
@@ -1247,9 +1253,9 @@ window.addEventListener('resize',()=>drawLineChart());
   setStatus('ok','초기 데이터 로드 완료 — 🔄 버튼으로 최신 시세 갱신');
 })();
 
-// 5분마다 자동 시세 갱신
+// 5분마다 자동 시세 갱신 (스냅샷 저장 X)
 setInterval(async()=>{
-  await fetchAllPrices();
+  await fetchAllPrices(false);
   if(currentPeriod==='1D') buildChartHistory();
 },5*60*1000);
 
