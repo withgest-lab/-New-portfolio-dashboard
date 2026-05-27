@@ -989,7 +989,14 @@ let currentPeriod='1D',chartHistory=[],selectedAssets=new Set(),showSum=true;
 function getPeriodStart(period){
   const now=new Date();
   function d605(d){d.setHours(6,5,0,0);return d;}
-  if(period==='1D'){const t=new Date(now);d605(t);if(now<t)t.setDate(t.getDate()-1);return t;}
+  if(period==='1D'){
+    const t=new Date(now);
+    t.setHours(22,30,0,0);
+    if(now.getHours()<22||(now.getHours()===22&&now.getMinutes()<30)){
+      t.setDate(t.getDate()-1); // 22:30 이전이면 전날 22:30
+    }
+    return t;
+  }
   if(period==='1W'){const m=new Date(now);const day=m.getDay();m.setDate(m.getDate()-(day===0?6:day-1));d605(m);return m;}
   if(period==='1M') return new Date(now.getFullYear(),now.getMonth(),1,6,5,0);
   if(period==='3M'){const m=now.getMonth()-2;const y=now.getFullYear()+(m<0?-1:0);return new Date(y,((m%12)+12)%12,1,6,5,0);}
