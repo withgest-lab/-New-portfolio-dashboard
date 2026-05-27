@@ -172,6 +172,7 @@ tr:hover td{background:var(--color-section-bg);}
     <div class="status-wrap">
       <div class="dot" id="statusDot"></div>
       <span id="statusText">준비 중...</span>
+      <span id="fxDisplay" style="font-size:10px;color:var(--color-tertiary);margin-left:6px;"></span>
     </div>
     <button class="btn btn-green" onclick="fetchAllPrices(false)">🔄 시세 갱신</button>
     <button class="btn btn-primary" onclick="saveSnap()">📸 스냅샷</button>
@@ -460,6 +461,9 @@ async function fetchFXRate(pair){
 function setStatus(state,text){
   document.getElementById('statusDot').className='dot '+state;
   document.getElementById('statusText').textContent=text;
+  // 환율 항상 표시
+  const fx = document.getElementById('fxDisplay');
+  if(fx) fx.textContent = `$1=₩${FX.USD.toLocaleString('ko-KR',{maximumFractionDigits:1})} · ¥1=₩${FX.JPY.toFixed(2)}`;
 }
 
 let isFetching=false;
@@ -1272,6 +1276,9 @@ setInterval(async()=>{
 function renderAll(){
   renderTable();renderSummary();renderDonuts();
   buildChartHistory();renderToggles();
+  // 환율 표시 갱신
+  const fx = document.getElementById('fxDisplay');
+  if(fx) fx.textContent = `$1=₩${FX.USD.toLocaleString('ko-KR',{maximumFractionDigits:1})} · ¥1=₩${FX.JPY.toFixed(2)}`;
 }
 
 /* ════════════════════════════════════════
