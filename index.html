@@ -520,13 +520,54 @@ function updn(n){return n>=0?'up':'dn';}
 function loadSnaps(){try{return JSON.parse(localStorage.getItem(SNAP_KEY)||'[]');}catch(e){return[];}}
 function saveSnaps(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
 
+function compressSnaps(snaps) {
+  // 오래된 스냅샷을 기간별로 압축해서 500개 한도 안에 10년 데이터 보존
+  const now   = Date.now();
+  const MIN   = 60000;
+  const HOUR  = 60 * MIN;
+  const DAY   = 24 * HOUR;
+
+  const rules = [
+    { maxAge:  2*DAY,     keepEvery:  1*HOUR  }, // 최근 2일: 1시간마다
+    { maxAge: 14*DAY,     keepEvery:  6*HOUR  }, // 2일~2주: 6시간마다
+    { maxAge: 90*DAY,     keepEvery:  1*DAY   }, // 2주~3달: 하루 1회
+    { maxAge: 365*DAY,    keepEvery:  7*DAY   }, // 3달~1년: 주 1회
+    { maxAge: 3*365*DAY,  keepEvery: 15*DAY   }, // 1년~3년: 월 2회
+    { maxAge: 10*365*DAY, keepEvery: 30*DAY   }, // 3년~10년: 월 1회
+  ];
+
+  // 각 스냅샷이 해당 규칙에서 유지할 대표 스냅샷인지 확인
+  const sorted = [...snaps].sort((a,b) => a.timestamp - b.timestamp);
+  const kept = [];
+  const buckets = new Set(); // 버킷 키로 중복 방지
+
+  for (const snap of sorted) {
+    const age = now - snap.timestamp;
+    const rule = rules.find(r => age <= r.maxAge) || rules[rules.length-1];
+    const bucketKey = Math.floor(snap.timestamp / rule.keepEvery);
+    if (!buckets.has(bucketKey)) {
+      buckets.add(bucketKey);
+      kept.push(snap);
+    }
+  }
+
+  // 최신 스냅샷은 항상 보존
+  const latestKeptId = kept.length ? kept[kept.length-1].id : null;
+  const latestSnap   = sorted[sorted.length-1];
+  if (latestSnap && latestKeptId !== latestSnap.id) {
+    kept.push(latestSnap);
+  }
+
+  return kept.sort((a,b) => a.timestamp - b.timestamp);
+}
+
 function saveSnap(){
-  const total=totalEv();
-  if(total<1000000) return;
-  const byAsset=Object.fromEntries(assets.map(a=>[a.id,Math.round(evKRW(a))]));
-  const snaps=loadSnaps();
-  snaps.push({id:uid(),timestamp:Date.now(),totalValue:Math.round(total),byAsset});
-  if(snaps.length>500) snaps.splice(0,snaps.length-500);
+  const total = totalEv();
+  if(total < 1000000) return;
+  const byAsset = Object.fromEntries(assets.map(a=>[a.id, Math.round(evKRW(a))]));
+  let snaps = loadSnaps();
+  snaps.push({id:uid(), timestamp:Date.now(), totalValue:Math.round(total), byAsset});
+  snaps = compressSnaps(snaps); // 압축 적용
   saveSnaps(snaps);
   renderSnaps();
 }
@@ -1210,7 +1251,8 @@ function confirmSaveSheets(){
 /* ════════════════════════════════════════
    자동 스냅샷 (시장 사이클 7회)
 ════════════════════════════════════════ */
-const AUTO_SNAP_TIMES=[{h:5,m:25},{h:6,m:25},{h:9,m:25},{h:15,m:20},{h:15,m:55},{h:22,m:50},{h:23,m:0}];
+const AUTO_SNAP_TIMES = Array.from({length:24}, (_,h) => ({h, m:0}));
+// 매시 정각 자동 저장 (하루 24회)
 const snapFiredDate={};
 AUTO_SNAP_TIMES.forEach(t=>{snapFiredDate[`${t.h}:${t.m}`]='';});
 setInterval(async()=>{
