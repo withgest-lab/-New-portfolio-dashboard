@@ -238,9 +238,11 @@ tr:hover td{background:var(--color-section-bg);}
   <div style="margin-top:16px;">
     <div class="trade-tabs">
       <button class="trade-tab" id="tab_buy" onclick="switchTab('buy')"
-        style="color:var(--color-accent);border-bottom-color:var(--color-accent);">추가</button>
+        style="color:var(--color-accent);border-bottom-color:var(--color-accent);">매수</button>
       <button class="trade-tab" id="tab_sell" onclick="switchTab('sell')"
         style="color:var(--color-tertiary);border-bottom-color:transparent;">매도</button>
+      <button class="trade-tab" id="tab_cash" onclick="switchTab('cash')"
+        style="color:var(--color-tertiary);border-bottom-color:transparent;">💵 현금</button>
     </div>
 
     <!-- 추가 폼 -->
@@ -269,7 +271,7 @@ tr:hover td{background:var(--color-section-bg);}
         <option value="USD">USD $</option>
         <option value="JPY">JPY ¥</option>
       </select></label>
-      <button class="btn btn-primary" onclick="addAsset()">+ 추가</button>
+      <button class="btn btn-primary" onclick="addAsset()">+ 매수</button>
     </div>
 
     <!-- 매도 폼 -->
@@ -282,6 +284,21 @@ tr:hover td{background:var(--color-section-bg);}
       <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
       <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
       <button class="btn btn-red" onclick="sellAsset()">− 매도</button>
+    </div>
+    <!-- 현금 폼 -->
+    <div id="form_cash" class="add-form" style="display:none;">
+      <label>이름
+        <input id="cf_name" placeholder="현금·CMA·예금 등" style="width:120px">
+      </label>
+      <label>금액
+        <input id="cf_amount" type="number" placeholder="0" style="width:130px">
+      </label>
+      <label>통화<select id="cf_cur">
+        <option value="KRW">KRW ₩</option>
+        <option value="USD">USD $</option>
+        <option value="JPY">JPY ¥</option>
+      </select></label>
+      <button class="btn" style="background:#34c75920;color:#34c759;" onclick="addCash()">+ 현금 추가</button>
     </div>
     <div class="form-status" id="formStatus"></div>
   </div>
@@ -517,7 +534,10 @@ function toKRW(a,price){
   if(a.currency==='JPY') return price*FX.JPY;
   return price;
 }
-function evKRW(a){return toKRW(a,a.currentPrice)*a.quantity;}
+function evKRW(a){
+  // 현금: currentPrice = 보유 외화 금액 그대로 (환율 자동 반영)
+  return toKRW(a, a.currentPrice) * a.quantity;
+}
 function costKRW(a){return toKRW(a,a.avgPrice)*a.quantity;}
 function totalEv(){return assets.reduce((s,a)=>s+evKRW(a),0);}
 function fmt(n){
@@ -617,12 +637,13 @@ function renderSnaps(){
 /* ════════════════════════════════════════
    자산 목록
 ════════════════════════════════════════ */
-let editingId=null;
+let editingId=null, quickTradeId=null;
+
 function renderTable(){
   const tb=document.getElementById('assetTbody');
   tb.innerHTML=assets.map(a=>{
     const ev=evKRW(a),cost=costKRW(a),pnl=ev-cost,rtn=cost>0?(pnl/cost)*100:0;
-    const dayChg=a.prevPrice>0?((a.currentPrice-a.prevPrice)/a.prevPrice)*100:0;
+    const dayChg=a.category==='cash'?0:(a.prevPrice>0?((a.currentPrice-a.prevPrice)/a.prevPrice)*100:0);
     const sym=CUR_SYM[a.currency];
     const cc=CAT_COLS[a.category]||'#8e8e93';
     const priceStr=p=>{
@@ -630,28 +651,75 @@ function renderTable(){
       if(a.currency==='JPY') return '¥'+Math.round(p).toLocaleString('ja-JP');
       return '₩'+Math.round(p).toLocaleString('ko-KR');
     };
-    let rows=`<tr>
+
+    // 현금 현재가 표시: USD/JPY면 "금액 (환율적용)" 표시
+    let cashPriceDisplay = priceStr(a.currentPrice);
+    if(a.category==='cash' && a.currency!=='KRW'){
+      cashPriceDisplay = `${priceStr(a.currentPrice)}<br><span style="font-size:10px;color:var(--color-tertiary)">₩${Math.round(evKRW(a)).toLocaleString('ko-KR')}</span>`;
+    }
+
+    // 현금은 전일比 대신 환율 표시
+    let dayChgCell = a.category==='cash'
+      ? (a.currency==='USD'?`<span style="font-size:10px;color:var(--color-tertiary)">$1=₩${FX.USD.toFixed(0)}</span>`
+        :a.currency==='JPY'?`<span style="font-size:10px;color:var(--color-tertiary)">¥1=₩${FX.JPY.toFixed(2)}</span>`
+        :'—')
+      : `<span class="${updn(dayChg)}">${fmtPct(dayChg)}</span>`;
+
+    let rows=`<tr style="cursor:pointer;" onclick="toggleQuickTrade('${a.id}')">
       <td class="name-cell">
         <div class="name-main">${a.name}</div>
-        <div class="name-sub">${a.ticker}</div>
+        <div class="name-sub">${a.ticker==='—'?'현금':a.ticker}</div>
       </td>
       <td><span class="cat-badge" style="background:${cc}20;color:${cc}">${tableBadge(a)}</span></td>
-      <td style="font-size:11px;">${priceStr(a.currentPrice)}</td>
-      <td class="${updn(dayChg)}" style="font-size:11px;">${fmtPct(dayChg)}</td>
+      <td style="font-size:11px;">${cashPriceDisplay}</td>
+      <td style="font-size:11px;">${dayChgCell}</td>
       <td class="col-hide" style="font-size:11px;">${priceStr(a.avgPrice)}</td>
-      <td class="col-hide" style="font-size:11px;">${a.quantity.toLocaleString()}</td>
+      <td class="col-hide" style="font-size:11px;">${a.category==='cash'?'—':a.quantity.toLocaleString()}</td>
       <td class="col-hide" style="font-size:11px;">${fmt(cost)}</td>
       <td style="font-size:11px;">${fmt(ev)}</td>
       <td class="${updn(pnl)}" style="font-size:11px;">${pnl>=0?'+':''}${fmt(pnl)}</td>
       <td class="${updn(rtn)}" style="font-size:11px;font-weight:700;">${fmtPct(rtn)}</td>
-      <td style="white-space:nowrap;">
+      <td style="white-space:nowrap;" onclick="event.stopPropagation()">
         <button class="edit-btn" onclick="toggleEdit('${a.id}')">✏️</button>
         <button class="del-btn" onclick="delAsset('${a.id}')">🗑</button>
       </td>
     </tr>`;
+
+    // 빠른 매수/매도 패널
+    if(quickTradeId===a.id){
+      rows+=`<tr style="background:#f8f9ff;">
+        <td colspan="11" style="padding:12px 16px;" onclick="event.stopPropagation()">
+          <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+            <div style="font-size:12px;font-weight:700;color:var(--color-text);min-width:80px;">
+              ${a.name}<br>
+              <span style="font-size:10px;color:var(--color-tertiary)">보유 ${a.quantity.toLocaleString()}주 · 평균 ${priceStr(a.avgPrice)}</span>
+            </div>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">수량
+              <input id="qt_qty_${a.id}" type="number" placeholder="0" min="0"
+                style="width:80px;border:1px solid var(--color-border);border-radius:7px;padding:5px 8px;font-size:12px;font-family:inherit;">
+            </label>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">단가(${a.currency})
+              <input id="qt_price_${a.id}" type="number" placeholder="${a.currentPrice}"
+                style="width:110px;border:1px solid var(--color-border);border-radius:7px;padding:5px 8px;font-size:12px;font-family:inherit;">
+            </label>
+            <div style="display:flex;gap:6px;">
+              <button class="btn" style="background:#007aff;color:#fff;padding:6px 14px;"
+                onclick="quickBuy('${a.id}')">+ 매수</button>
+              <button class="btn" style="background:#ff3b3015;color:var(--color-up);padding:6px 14px;"
+                onclick="quickSell('${a.id}')">− 매도</button>
+              <button class="btn btn-ghost" style="padding:6px 10px;"
+                onclick="quickTradeId=null;renderTable()">✕</button>
+            </div>
+          </div>
+          <div id="qt_status_${a.id}" style="font-size:11px;color:var(--color-secondary);margin-top:6px;min-height:14px;"></div>
+        </td>
+      </tr>`;
+    }
+
+    // 인라인 편집 패널
     if(editingId===a.id){
       rows+=`<tr class="inline-edit">
-        <td colspan="11" style="text-align:left;padding:10px">
+        <td colspan="11" style="text-align:left;padding:10px 16px">
           <span style="font-size:12px;color:var(--color-tertiary);margin-right:8px">수량:</span>
           <input id="ei_qty" type="number" value="${a.quantity}" style="width:90px">
           <span style="font-size:12px;color:var(--color-tertiary);margin:0 8px">단가(${a.currency}):</span>
@@ -664,7 +732,51 @@ function renderTable(){
     return rows;
   }).join('');
 }
-function toggleEdit(id){editingId=editingId===id?null:id;renderTable();}
+function toggleQuickTrade(id){
+  quickTradeId = quickTradeId===id ? null : id;
+  editingId = null;
+  renderTable();
+  // 패널 열리면 수량 입력칸으로 포커스
+  if(quickTradeId) setTimeout(()=>{
+    const el=document.getElementById(`qt_qty_${id}`);
+    if(el) el.focus();
+  },50);
+}
+
+function quickBuy(id){
+  const a=assets.find(x=>x.id===id); if(!a) return;
+  const qty=parseFloat(document.getElementById(`qt_qty_${id}`).value);
+  const price=parseFloat(document.getElementById(`qt_price_${id}`).value)||a.currentPrice;
+  const st=document.getElementById(`qt_status_${id}`);
+  if(isNaN(qty)||qty<=0){st.textContent='❌ 수량을 입력해 주세요.';return;}
+  // 가중평균 단가 계산
+  const newAvg=Math.round(((a.avgPrice*a.quantity)+(price*qty))/(a.quantity+qty)*100)/100;
+  a.quantity+=qty;
+  a.avgPrice=newAvg;
+  st.innerHTML=`✅ ${qty.toLocaleString()}주 매수 → 총 <b>${a.quantity.toLocaleString()}주</b> · 평균 ${CUR_SYM[a.currency]}${newAvg.toLocaleString()}`;
+  saveAssets(); renderAll();
+  setTimeout(()=>{ quickTradeId=null; renderTable(); },2500);
+}
+
+function quickSell(id){
+  const a=assets.find(x=>x.id===id); if(!a) return;
+  const qty=parseFloat(document.getElementById(`qt_qty_${id}`).value);
+  const price=parseFloat(document.getElementById(`qt_price_${id}`).value)||a.currentPrice;
+  const st=document.getElementById(`qt_status_${id}`);
+  if(isNaN(qty)||qty<=0){st.textContent='❌ 수량을 입력해 주세요.';return;}
+  if(qty>a.quantity){st.textContent=`❌ 보유 수량(${a.quantity.toLocaleString()}주) 초과`;return;}
+  const pnl=(price-a.avgPrice)*qty;
+  const sym=CUR_SYM[a.currency];
+  if(qty===a.quantity){
+    assets=assets.filter(x=>x.id!==id);
+    st.innerHTML=`✅ 전량 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.round(Math.abs(pnl)).toLocaleString()}</b>`;
+  }else{
+    a.quantity-=qty;
+    st.innerHTML=`✅ ${qty.toLocaleString()}주 매도 · 잔여 <b>${a.quantity.toLocaleString()}주</b> · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.round(Math.abs(pnl)).toLocaleString()}</b>`;
+  }
+  saveAssets(); renderAll();
+  setTimeout(()=>{ quickTradeId=null; renderTable(); },2500);
+}
 function cancelEdit(){editingId=null;renderTable();}
 function saveEdit(id){
   const a=assets.find(x=>x.id===id);if(!a)return;
@@ -683,16 +795,52 @@ function delAsset(id){
    매수/매도 탭
 ════════════════════════════════════════ */
 function switchTab(tab){
-  const isBuy=tab==='buy';
-  document.getElementById('form_buy').style.display=isBuy?'flex':'none';
-  document.getElementById('form_sell').style.display=isBuy?'none':'flex';
-  const tb=document.getElementById('tab_buy');
-  const ts=document.getElementById('tab_sell');
-  tb.style.color=isBuy?'var(--color-accent)':'var(--color-tertiary)';
-  tb.style.borderBottomColor=isBuy?'var(--color-accent)':'transparent';
-  ts.style.color=isBuy?'var(--color-tertiary)':'var(--color-up)';
-  ts.style.borderBottomColor=isBuy?'transparent':'var(--color-up)';
+  ['buy','sell','cash'].forEach(t=>{
+    const form=document.getElementById(`form_${t}`);
+    const btn=document.getElementById(`tab_${t}`);
+    if(!form||!btn) return;
+    const isActive=tab===t;
+    form.style.display=isActive?'flex':'none';
+    const colors={
+      buy:  {active:'var(--color-accent)', border:'var(--color-accent)'},
+      sell: {active:'var(--color-up)',     border:'var(--color-up)'},
+      cash: {active:'#34c759',             border:'#34c759'},
+    };
+    btn.style.color     = isActive ? colors[t].active : 'var(--color-tertiary)';
+    btn.style.borderBottomColor = isActive ? colors[t].border : 'transparent';
+  });
   document.getElementById('formStatus').textContent='';
+}
+
+function addCash(){
+  const name   = document.getElementById('cf_name').value.trim() || '현금';
+  const amount = parseFloat(document.getElementById('cf_amount').value);
+  const cur    = document.getElementById('cf_cur').value;
+  const st     = document.getElementById('formStatus');
+  if(isNaN(amount)||amount<=0){st.textContent='❌ 금액을 입력해 주세요.';return;}
+
+  // 같은 이름+통화 현금이 있으면 업데이트, 없으면 추가
+  const existing = assets.find(a=>a.category==='cash'&&a.name===name&&a.currency===cur);
+  if(existing){
+    existing.avgPrice    = amount;
+    existing.currentPrice = amount;
+    existing.prevPrice   = amount;
+    existing.quantity    = 1;
+    st.textContent=`✅ ${name} ${CUR_SYM[cur]}${amount.toLocaleString()} 으로 업데이트`;
+  }else{
+    assets.push({
+      id:uid(), ticker:'—', name, category:'cash',
+      quantity:1, avgPrice:amount,
+      currentPrice:amount, prevPrice:amount, currency:cur
+    });
+    st.textContent=`✅ ${name} ${CUR_SYM[cur]}${amount.toLocaleString()} 추가 완료`;
+  }
+  // 폼 초기화
+  document.getElementById('cf_name').value='';
+  document.getElementById('cf_amount').value='';
+  document.getElementById('cf_cur').value='KRW';
+  setTimeout(()=>{st.textContent='';},4000);
+  saveAssets();renderAll();
 }
 
 /* ════════════════════════════════════════
@@ -784,6 +932,20 @@ document.addEventListener('click',e=>{
   });
 });
 
+function resetBuyForm(){
+  ['af_name','af_ticker','af_qty','af_price'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('af_cat').value='';
+  document.getElementById('af_cur').value='KRW';
+  document.getElementById('af_suggestions').style.display='none';
+}
+function resetSellForm(){
+  ['sf_name','sf_held','sf_qty','sf_price'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.value='';if(el.dataset)delete el.dataset.assetId;}
+  });
+  document.getElementById('sf_suggestions').style.display='none';
+}
+
 function addAsset(){
   const name=document.getElementById('af_name').value.trim();
   const ticker=document.getElementById('af_ticker').value.trim().toUpperCase();
@@ -804,16 +966,13 @@ function addAsset(){
     const totalQty=existing.quantity+qty;
     existing.avgPrice=Math.round((prevCost+newCost)/totalQty*100)/100;
     existing.quantity=totalQty;
-    st.textContent=`✅ ${existing.name} ${qty.toLocaleString()}주 추가 → 총 ${totalQty.toLocaleString()}주, 평균 ${Math.round(existing.avgPrice).toLocaleString()}`;
+    st.textContent=`✅ ${existing.name} ${qty.toLocaleString()}주 매수 → 총 ${totalQty.toLocaleString()}주, 평균 ${Math.round(existing.avgPrice).toLocaleString()}`;
   }else{
     assets.push({id:uid(),ticker:tickerVal,name,category:cat,quantity:qty,avgPrice:price,currentPrice:price,prevPrice:price,currency:cur});
-    st.textContent=`✅ ${name} 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`;
+    st.textContent=`✅ ${name} 매수 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`;
   }
-  ['af_name','af_ticker','af_qty','af_price'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('af_cat').value='';
-  document.getElementById('af_cur').value='KRW';
-  document.getElementById('af_suggestions').style.display='none';
-  setTimeout(()=>{st.textContent='';},5000);
+  resetBuyForm();
+  setTimeout(()=>{st.textContent='';},4000);
   saveAssets();renderAll();
 }
 
@@ -841,7 +1000,8 @@ function sellAsset(){
   ['sf_name','sf_held','sf_qty','sf_price'].forEach(id=>{
     const el=document.getElementById(id);el.value='';if(el.dataset)delete el.dataset.assetId;
   });
-  setTimeout(()=>{st.textContent='';},6000);
+  document.getElementById('sf_suggestions').style.display='none';
+  setTimeout(()=>{st.textContent='';},4000);
   saveAssets();renderAll();
 }
 
