@@ -83,7 +83,8 @@ th:first-child{text-align:left;}
 td{padding:8px 4px;border-bottom:1px solid var(--color-section-bg);text-align:right;white-space:nowrap;vertical-align:middle;}
 td:first-child{text-align:left;}
 tr:last-child td{border-bottom:none;}
-tr:hover td{background:var(--color-section-bg);}
+tr:hover td{background:rgba(0,0,0,.03);}
+tr:hover td.name-cell{background:rgba(0,0,0,.03)!important;}
 .name-cell{max-width:120px;}
 .name-main{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;}
 .name-sub{font-size:10px;color:var(--color-tertiary);margin-top:1px;}
@@ -309,25 +310,27 @@ tr:hover td{background:var(--color-section-bg);}
 <div class="card">
   <div class="section-label">비중 현황</div>
   <div style="display:flex;gap:16px;flex-wrap:wrap;">
-    <!-- 왼쪽 50%: 도넛 + legend -->
+    <!-- 왼쪽 50%: 도넛 + 작은 legend -->
     <div style="flex:1;min-width:260px;display:flex;flex-direction:column;align-items:center;">
-      <div style="font-size:11px;font-weight:600;color:var(--color-tertiary);text-align:center;
-                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">카테고리 비중</div>
-      <div style="display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap;">
+      <div style="font-size:10px;font-weight:600;color:var(--color-tertiary);text-align:center;
+                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">카테고리 비중</div>
+      <div style="display:flex;gap:12px;align-items:center;justify-content:center;">
+        <!-- 도넛 -->
         <div class="donut-canvas-wrap">
-          <canvas id="catDonut" width="220" height="220"></canvas>
+          <canvas id="catDonut" width="200" height="200"></canvas>
           <div class="donut-center">
             <div class="dc-lbl">총 자산</div>
             <div class="dc-val" id="catCenter">—</div>
           </div>
         </div>
-        <div id="catLegend" style="display:flex;flex-direction:column;justify-content:center;min-width:140px;"></div>
+        <!-- 작은 legend -->
+        <div id="catLegend" style="display:flex;flex-direction:column;gap:6px;justify-content:center;"></div>
       </div>
     </div>
-    <!-- 오른쪽 50%: 종목 막대 그래프 -->
+    <!-- 오른쪽 50%: 종목 막대그래프 -->
     <div style="flex:1;min-width:260px;display:flex;flex-direction:column;">
-      <div style="font-size:11px;font-weight:600;color:var(--color-tertiary);text-align:center;
-                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;">종목 비중</div>
+      <div style="font-size:10px;font-weight:600;color:var(--color-tertiary);text-align:center;
+                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">종목 비중</div>
       <div id="barChart" style="flex:1;"></div>
     </div>
   </div>
@@ -1494,7 +1497,7 @@ function drawDonut(canvasId,data){
   const cv=document.getElementById(canvasId);if(!cv)return;
   const ctx=cv.getContext('2d');
   const dpr=window.devicePixelRatio||1;
-  const LW=220,LH=220,cx=110,cy=110,OR=100,IR=60;
+  const LW=200,LH=200,cx=100,cy=100,OR=90,IR=54;
   cv.width=Math.round(LW*dpr);cv.height=Math.round(LH*dpr);
   cv.style.width=LW+'px';cv.style.height=LH+'px';
   ctx.scale(dpr,dpr);ctx.clearRect(0,0,LW,LH);
@@ -1540,13 +1543,13 @@ function renderDonuts(){
   // legend: 색상 바 + 카테고리명 | % | 금액 → 한 줄에 모두 표시
   document.getElementById('catLegend').innerHTML=catData.map(d=>{
     const pct=total>0?((d.value/total)*100):0;
-    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--color-section-bg);">
-      <div style="width:4px;height:36px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
+    return`<div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-bottom:1px solid var(--color-section-bg);">
+      <div style="width:3px;height:28px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:12px;font-weight:700;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.label}</div>
-        <div style="font-size:11px;color:var(--color-secondary);margin-top:1px;">${fmt(d.value)}</div>
+        <div style="font-size:9px;font-weight:700;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.label}</div>
+        <div style="font-size:9px;color:var(--color-tertiary);margin-top:1px;">${fmt(d.value)}</div>
       </div>
-      <div style="font-size:12px;font-weight:800;color:${d.color};flex-shrink:0;min-width:40px;text-align:right;">${pct.toFixed(1)}%</div>
+      <div style="font-size:10px;font-weight:800;color:${d.color};flex-shrink:0;min-width:34px;text-align:right;">${pct.toFixed(1)}%</div>
     </div>`;
   }).join('');
 
