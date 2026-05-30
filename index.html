@@ -79,12 +79,12 @@ canvas#lineChart{width:100%!important;display:block;}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;}
 th{font-size:10px;font-weight:600;color:var(--color-tertiary);text-transform:uppercase;
   letter-spacing:.05em;text-align:right;padding:7px 4px;border-bottom:1px solid var(--color-border);white-space:nowrap;}
-th:first-child{text-align:left;}
+th:first-child{text-align:left;position:sticky;left:0;background:var(--color-card);z-index:3;}
+td:first-child{position:sticky;left:0;background:var(--color-card);z-index:2;text-align:left;}
 td{padding:8px 4px;border-bottom:1px solid var(--color-section-bg);text-align:right;white-space:nowrap;vertical-align:middle;}
-td:first-child{text-align:left;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:rgba(0,0,0,.03);}
-tr:hover td.name-cell{background:rgba(0,0,0,.03)!important;}
+tr:hover td:first-child{background:rgba(242,242,247,.95)!important;}
 .name-cell{max-width:120px;}
 .name-main{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;}
 .name-sub{font-size:10px;color:var(--color-tertiary);margin-top:1px;}
@@ -226,7 +226,7 @@ tr:hover td.name-cell{background:rgba(0,0,0,.03)!important;}
   <div class="tbl-wrap">
     <table>
       <thead><tr>
-        <th style="position:sticky;left:0;background:var(--color-card);z-index:2;min-width:100px;">종목</th>
+        <th>종목</th>
         <th>구분</th><th>현재가</th><th>전일比</th>
         <th>평균단가</th><th>수량</th>
         <th>투자원금</th><th>평가금액</th>
@@ -845,7 +845,7 @@ function renderTable(){
       : `<span class="${updn(dayChg)}">${fmtPct(dayChg)}</span>`;
 
     let rows=`<tr style="cursor:pointer;" ondblclick="toggleQuickTrade('${a.id}')">
-      <td class="name-cell" style="position:sticky;left:0;background:var(--color-card);z-index:1;">
+      <td class="name-cell">
         <div class="name-main">${a.name}</div>
         <div class="name-sub">${a.ticker==='—'?'현금':a.ticker}</div>
       </td>
