@@ -827,8 +827,18 @@ function renderTable(){
       <td class="${updn(pnl)}" style="font-size:11px;">${pnl>=0?'+':''}${fmt(pnl)}</td>
       <td class="${updn(rtn)}" style="font-size:11px;font-weight:700;">${fmtPct(rtn)}</td>
       <td style="white-space:nowrap;" onclick="event.stopPropagation()">
-        <button class="edit-btn" onclick="toggleEdit('${a.id}')">✏️</button>
-        <button class="del-btn" onclick="delAsset('${a.id}')">🗑</button>
+        <button class="edit-btn"
+          style="transition:.15s;border-radius:6px;padding:3px 5px;"
+          onmousedown="this.style.background='#007aff20';this.style.transform='scale(.9)'"
+          onmouseup="this.style.transform='scale(1)'"
+          onmouseleave="this.style.background='transparent';this.style.transform='scale(1)'"
+          onclick="toggleEdit('${a.id}')">✏️</button>
+        <button class="del-btn"
+          style="transition:.15s;border-radius:6px;padding:3px 5px;"
+          onmousedown="this.style.background='#ff3b3020';this.style.transform='scale(.9)'"
+          onmouseup="this.style.transform='scale(1)'"
+          onmouseleave="this.style.background='transparent';this.style.transform='scale(1)'"
+          onclick="confirmDelete('${a.id}','${a.name.replace(/'/g,'')}')">🗑</button>
       </td>
     </tr>`;
 
@@ -868,7 +878,7 @@ function renderTable(){
                        border:1px solid #ff3b3030;transition:.15s;"
                 onclick="confirmTrade('${a.id}','sell')">− 매도</button>
               ${isEdit?`<button class="btn" style="background:#34c75920;color:#34c759;padding:7px 14px;font-size:13px;"
-                onclick="saveEditDirect('${a.id}')">✓ 수정저장</button>`:''}
+                onclick="confirmSaveEdit('${a.id}')">✓ 수정저장</button>`:''}
               <button class="btn btn-ghost" style="padding:7px 12px;font-size:13px;"
                 onclick="closeTradePanel()">✕ 닫기</button>
             </div>
@@ -977,44 +987,82 @@ function closeTradeConfirm(){
 function executeTrade(){
   if(!pendingTrade) return;
   const {id, mode, qty, price} = pendingTrade;
-  const a = assets.find(x=>x.id===id);
   closeTradeConfirm();
-  if(!a) return;
 
+  // 삭제
+  if(mode==='delete'){
+    assets = assets.filter(x=>x.id!==id);
+    saveAssets();renderAll();syncToSheets(true);
+    return;
+  }
+
+  // 수정저장
+  if(mode==='edit'){
+    const a = assets.find(x=>x.id===id); if(!a) return;
+    if(!isNaN(qty)&&qty>=0)    a.quantity = qty;
+    if(!isNaN(price)&&price>0) a.avgPrice = price;
+    editingId=null; quickTradeId=null;
+    saveAssets();renderAll();syncToSheets(true);
+    return;
+  }
+
+  // 매수/매도
+  const a = assets.find(x=>x.id===id);
+  if(!a) return;
   const sym = CUR_SYM[a.currency];
   if(mode==='buy'){
     const newAvg = ((a.avgPrice*a.quantity)+(price*qty))/(a.quantity+qty);
     a.avgPrice  = Math.round(newAvg*100)/100;
     a.quantity += qty;
-    const st = document.getElementById(`tp_status_${id}`);
-    if(st) st.textContent=`✅ ${qty.toLocaleString()}주 매수 → 총 ${a.quantity.toLocaleString()}주`;
   } else {
-    const pnl = Math.round((price - a.avgPrice) * qty);
     if(qty===a.quantity){
       assets = assets.filter(x=>x.id!==id);
     } else {
       a.quantity -= qty;
     }
-    const st = document.getElementById(`tp_status_${id}`);
-    if(st) st.innerHTML=`✅ ${qty.toLocaleString()}주 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`;
   }
   saveAssets();renderAll();syncToSheets(true);
-  setTimeout(()=>{ quickTradeId=null; editingId=null; renderTable(); }, 2000);
+  setTimeout(()=>{ quickTradeId=null; editingId=null; renderTable(); }, 1500);
 }
 
 function closeTradePanel(){
   quickTradeId=null; editingId=null; renderTable();
 }
 
-// 수정저장 (수량/단가만 직접 변경)
-function saveEditDirect(id){
+// 삭제 확인 팝업
+function confirmDelete(id, name){
+  pendingTrade = {id, mode:'delete'};
+  const titleEl   = document.getElementById('tc_title');
+  const detailEl  = document.getElementById('tc_detail');
+  const confirmBtn = document.getElementById('tc_confirm');
+  titleEl.innerHTML = `<span style="color:var(--color-up)">🗑 종목 삭제</span>`;
+  detailEl.innerHTML = `
+    <b>${name}</b> 종목을 삭제할까요?<br>
+    <span style="color:var(--color-tertiary);font-size:11px;">삭제 후 복구가 어렵습니다.</span>`;
+  confirmBtn.style.background = 'var(--color-up)';
+  confirmBtn.textContent = '삭제 확인';
+  document.getElementById('tradeConfirmModal').classList.add('open');
+}
+
+// 수정저장 확인 팝업
+function confirmSaveEdit(id){
   const a = assets.find(x=>x.id===id); if(!a) return;
   const qty   = parseFloat(document.getElementById(`tp_qty_${id}`)?.value);
   const price = parseFloat(document.getElementById(`tp_price_${id}`)?.value);
-  if(!isNaN(qty)&&qty>=0)   a.quantity = qty;
-  if(!isNaN(price)&&price>0) a.avgPrice = price;
-  editingId=null; quickTradeId=null;
-  saveAssets();renderAll();syncToSheets(true);
+  pendingTrade = {id, mode:'edit', qty, price};
+  const sym = CUR_SYM[a.currency];
+  const titleEl   = document.getElementById('tc_title');
+  const detailEl  = document.getElementById('tc_detail');
+  const confirmBtn = document.getElementById('tc_confirm');
+  titleEl.innerHTML = `<span style="color:#34c759">✓ 수정 저장</span>`;
+  detailEl.innerHTML = `
+    <b>${a.name}</b><br>
+    수량: ${!isNaN(qty)?qty.toLocaleString():'변경없음'}<br>
+    평균단가: ${!isNaN(price)?sym+price.toLocaleString():'변경없음'}<br>
+    <span style="color:var(--color-tertiary);font-size:11px;">위 내용으로 저장하시겠습니까?</span>`;
+  confirmBtn.style.background = '#34c759';
+  confirmBtn.textContent = '저장 확인';
+  document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
 // 매수/매도 시각적 선택 상태 (기존 setQuickMode 대체)
@@ -1040,8 +1088,8 @@ function saveEdit(id){
   editingId=null;saveAssets();renderAll();syncToSheets(true);
 }
 function delAsset(id){
-  if(!confirm('이 자산을 삭제할까요?')) return;
-  assets=assets.filter(a=>a.id!==id);saveAssets();renderAll();syncToSheets(true);
+  const a = assets.find(x=>x.id===id);
+  if(a) confirmDelete(id, a.name);
 }
 
 /* ════════════════════════════════════════
