@@ -75,8 +75,8 @@ canvas#lineChart{width:100%!important;display:block;}
 .sum-card .sum-sub{font-size:11px;margin-top:3px;}
 
 /* ── 테이블 ── */
-.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-table{width:100%;border-collapse:collapse;font-size:12px;}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;position:relative;}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;}
 th{font-size:10px;font-weight:600;color:var(--color-tertiary);text-transform:uppercase;
   letter-spacing:.05em;text-align:right;padding:7px 4px;border-bottom:1px solid var(--color-border);white-space:nowrap;}
 th:first-child{text-align:left;}
@@ -225,9 +225,10 @@ tr:hover td{background:var(--color-section-bg);}
   <div class="tbl-wrap">
     <table>
       <thead><tr>
-        <th>종목</th><th>구분</th><th>현재가</th><th>전일比</th>
-        <th class="col-hide">평균단가</th><th class="col-hide">수량</th>
-        <th class="col-hide">투자원금</th><th>평가금액</th>
+        <th style="position:sticky;left:0;background:var(--color-card);z-index:2;min-width:100px;">종목</th>
+        <th>구분</th><th>현재가</th><th>전일比</th>
+        <th>평균단가</th><th>수량</th>
+        <th>투자원금</th><th>평가금액</th>
         <th>평가손익</th><th>수익률</th><th>편집</th>
       </tr></thead>
       <tbody id="assetTbody"></tbody>
@@ -308,16 +309,20 @@ tr:hover td{background:var(--color-section-bg);}
 <div class="card">
   <div class="section-label">비중 현황</div>
   <div class="biased-wrap">
-    <div class="donut-side">
-      <div style="font-size:11px;color:var(--color-tertiary);margin-bottom:8px;">카테고리 비중</div>
-      <div class="donut-canvas-wrap">
-        <canvas id="catDonut" width="300" height="300"></canvas>
-        <div class="donut-center">
-          <div class="dc-lbl">총 자산</div>
-          <div class="dc-val" id="catCenter">—</div>
+    <!-- 도넛 + legend 나란히, 수직 중앙 정렬 -->
+    <div style="display:flex;gap:20px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:center;">
+      <div class="donut-side">
+        <div style="font-size:11px;color:var(--color-tertiary);margin-bottom:8px;text-align:center;">카테고리 비중</div>
+        <div class="donut-canvas-wrap">
+          <canvas id="catDonut" width="220" height="220"></canvas>
+          <div class="donut-center">
+            <div class="dc-lbl">총 자산</div>
+            <div class="dc-val" id="catCenter">—</div>
+          </div>
         </div>
       </div>
-      <div class="donut-legend" id="catLegend"></div>
+      <!-- legend: 도넛 오른쪽, 수직 중앙 정렬 -->
+      <div id="catLegend" style="display:flex;flex-direction:column;justify-content:center;min-width:160px;max-width:200px;"></div>
     </div>
     <div class="bar-side">
       <div style="font-size:11px;color:var(--color-tertiary);margin-bottom:12px;">종목 비중</div>
@@ -835,16 +840,16 @@ function renderTable(){
       : `<span class="${updn(dayChg)}">${fmtPct(dayChg)}</span>`;
 
     let rows=`<tr style="cursor:pointer;" onclick="toggleQuickTrade('${a.id}')">
-      <td class="name-cell">
+      <td class="name-cell" style="position:sticky;left:0;background:var(--color-card);z-index:1;box-shadow:2px 0 4px rgba(0,0,0,.06);">
         <div class="name-main">${a.name}</div>
         <div class="name-sub">${a.ticker==='—'?'현금':a.ticker}</div>
       </td>
       <td><span class="cat-badge" style="background:${cc}20;color:${cc}">${tableBadge(a)}</span></td>
       <td style="font-size:11px;">${cashPriceDisplay}</td>
       <td style="font-size:11px;">${dayChgCell}</td>
-      <td class="col-hide" style="font-size:11px;">${priceStr(a.avgPrice)}</td>
-      <td class="col-hide" style="font-size:11px;">${a.category==='cash'?'—':a.quantity.toLocaleString()}</td>
-      <td class="col-hide" style="font-size:11px;">${fmt(cost)}</td>
+      <td style="font-size:11px;">${priceStr(a.avgPrice)}</td>
+      <td style="font-size:11px;">${a.category==='cash'?'—':a.quantity.toLocaleString()}</td>
+      <td style="font-size:11px;">${fmt(cost)}</td>
       <td style="font-size:11px;">${fmt(ev)}</td>
       <td class="${updn(pnl)}" style="font-size:11px;">${pnl>=0?'+':''}${fmt(pnl)}</td>
       <td class="${updn(rtn)}" style="font-size:11px;font-weight:700;">${fmtPct(rtn)}</td>
@@ -1487,32 +1492,35 @@ function drawDonut(canvasId,data){
   const cv=document.getElementById(canvasId);if(!cv)return;
   const ctx=cv.getContext('2d');
   const dpr=window.devicePixelRatio||1;
-  const LW=260,LH=260,cx=130,cy=130,OR=108,IR=65;
+  const LW=220,LH=220,cx=110,cy=110,OR=100,IR=60;
   cv.width=Math.round(LW*dpr);cv.height=Math.round(LH*dpr);
   cv.style.width=LW+'px';cv.style.height=LH+'px';
   ctx.scale(dpr,dpr);ctx.clearRect(0,0,LW,LH);
   const total=data.reduce((s,d)=>s+d.value,0);if(!total)return;
-  let angle=-Math.PI/2;const GAP=0.018;
+  let angle=-Math.PI/2;const GAP=0.016;
   data.forEach(d=>{
     const sw=(d.value/total)*2*Math.PI;
+    // 섹터 그리기
     ctx.beginPath();
     ctx.arc(cx,cy,OR,angle+GAP,angle+sw-GAP);
     ctx.arc(cx,cy,IR,angle+sw-GAP,angle+GAP,true);
     ctx.closePath();ctx.fillStyle=d.color;ctx.fill();
-    // 섹터가 충분히 크면 % 텍스트만 안에 표시
-    if(sw>0.35){
+    // 섹터 중간에 % 표시 (모든 섹터)
+    if(sw>0.25){
       const mid=angle+sw/2;
-      const tx=cx+Math.cos(mid)*(IR+OR)/2;
-      const ty=cy+Math.sin(mid)*(IR+OR)/2;
-      ctx.font=`bold 11px Pretendard,-apple-system,sans-serif`;
-      ctx.fillStyle='#fff';
+      const r=(IR+OR)/2;
+      const tx=cx+Math.cos(mid)*r;
+      const ty=cy+Math.sin(mid)*r;
+      ctx.font=`bold 12px Pretendard,-apple-system,sans-serif`;
+      ctx.fillStyle='rgba(255,255,255,0.95)';
       ctx.textAlign='center';
       ctx.textBaseline='middle';
       ctx.fillText(((d.value/total)*100).toFixed(1)+'%',tx,ty);
     }
     angle+=sw;
   });
-  ctx.beginPath();ctx.arc(cx,cy,IR-2,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+  // 안쪽 흰 원
+  ctx.beginPath();ctx.arc(cx,cy,IR-1,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
   ctx.textAlign='left';ctx.textBaseline='alphabetic';
 }
 
@@ -1527,21 +1535,20 @@ function renderDonuts(){
   drawDonut('catDonut',catData);
   document.getElementById('catCenter').textContent=fmt(total);
 
-  // legend: 색상 동그라미 + 카테고리명 + % + 금액 (2열 그리드)
-  document.getElementById('catLegend').innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;width:100%;max-width:280px;">
-      ${catData.map(d=>`
-        <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-          <div style="width:10px;height:10px;border-radius:50%;background:${d.color};flex-shrink:0;"></div>
-          <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-            <span style="color:var(--color-text);font-weight:600;">${d.label}</span>
-            <span style="color:var(--color-tertiary);margin-left:4px;">${total>0?((d.value/total)*100).toFixed(1):0}%</span><br>
-            <span style="color:var(--color-secondary);font-size:10px;">${fmt(d.value)}</span>
-          </div>
-        </div>`).join('')}
+  // legend: 색상 바 + 카테고리명 | % | 금액 → 한 줄에 모두 표시
+  document.getElementById('catLegend').innerHTML=catData.map(d=>{
+    const pct=total>0?((d.value/total)*100):0;
+    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--color-section-bg);">
+      <div style="width:4px;height:36px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:700;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.label}</div>
+        <div style="font-size:11px;color:var(--color-secondary);margin-top:1px;">${fmt(d.value)}</div>
+      </div>
+      <div style="font-size:14px;font-weight:800;color:${d.color};flex-shrink:0;">${pct.toFixed(1)}%</div>
     </div>`;
+  }).join('');
 
-  // 막대 그래프: 전체 총자산 대비 % 기준으로 막대 너비 결정
+  // 막대 그래프: 전체 총자산 대비 % 기준
   const assetData=assets.map((a,i)=>({label:a.name,value:evKRW(a),color:ASSET_COLS[i%ASSET_COLS.length]})).sort((a,b)=>b.value-a.value);
   document.getElementById('barChart').innerHTML=assetData.map(d=>{
     const pct=total>0?(d.value/total)*100:0;
