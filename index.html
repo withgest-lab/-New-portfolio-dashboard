@@ -360,6 +360,20 @@ tr:hover td{background:var(--color-section-bg);}
 </div>
 </div>
 
+<!-- 매수/매도 확인 팝업 -->
+<div class="modal-bg" id="tradeConfirmModal">
+  <div class="modal-box" style="max-width:320px;position:relative;text-align:center;">
+    <div id="tc_title" style="font-size:17px;font-weight:700;margin-bottom:8px;"></div>
+    <div id="tc_detail" style="font-size:13px;color:var(--color-secondary);margin-bottom:20px;line-height:1.6;"></div>
+    <div style="display:flex;gap:10px;">
+      <button id="tc_cancel" class="btn btn-ghost" style="flex:1;padding:10px;"
+        onclick="closeTradeConfirm()">취소</button>
+      <button id="tc_confirm" class="btn btn-primary" style="flex:1;padding:10px;"
+        onclick="executeTrade()">확인</button>
+    </div>
+  </div>
+</div>
+
 <!-- 구글 시트 모달 -->
 <div class="modal-bg" id="sheetsModal">
   <div class="modal-box" style="max-width:400px;position:relative;">
@@ -818,54 +832,48 @@ function renderTable(){
       </td>
     </tr>`;
 
-    // 빠른 매수/매도 패널
-    if(quickTradeId===a.id){
-      rows+=`<tr style="background:#f8f9ff;">
-        <td colspan="11" style="padding:12px 16px;" onclick="event.stopPropagation()">
-          <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-            <div style="font-size:12px;font-weight:700;color:var(--color-text);min-width:80px;">
-              ${a.name}<br>
-              <span style="font-size:10px;color:var(--color-tertiary)">보유 ${a.quantity.toLocaleString()}주 · 평균 ${priceStr(a.avgPrice)}</span>
-            </div>
-            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">수량
-              <input id="qt_qty_${a.id}" type="number" placeholder="0" min="0"
-                style="width:80px;border:1px solid var(--color-border);border-radius:7px;padding:5px 8px;font-size:12px;font-family:inherit;">
+    // 통합 패널 (행 클릭 또는 편집 버튼)
+    if(quickTradeId===a.id || editingId===a.id){
+      const isEdit = editingId===a.id;
+      rows+=`<tr style="background:#f2f7ff;">
+        <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
+          <div style="font-size:12px;font-weight:700;margin-bottom:10px;">
+            ${a.name}
+            <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
+              보유 ${a.quantity.toLocaleString()}주 · 평균 ${priceStr(a.avgPrice)}
+            </span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              수량
+              <input id="tp_qty_${a.id}" type="number" placeholder="0" min="0"
+                value="${isEdit?a.quantity:''}"
+                style="width:90px;border:1px solid var(--color-border);border-radius:8px;
+                       padding:6px 10px;font-size:13px;font-family:inherit;">
             </label>
-            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">단가(${a.currency})
-              <input id="qt_price_${a.id}" type="number" placeholder="${a.currentPrice}"
-                style="width:110px;border:1px solid var(--color-border);border-radius:7px;padding:5px 8px;font-size:12px;font-family:inherit;">
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              단가 (${a.currency})
+              <input id="tp_price_${a.id}" type="number"
+                value="${isEdit?a.avgPrice:a.currentPrice}"
+                style="width:110px;border:1px solid var(--color-border);border-radius:8px;
+                       padding:6px 10px;font-size:13px;font-family:inherit;">
             </label>
-            <div style="display:flex;gap:6px;">
-              <button id="qt_buy_btn_${a.id}" class="btn" style="background:#007aff;color:#fff;padding:6px 14px;transition:.15s;"
-                onclick="setQuickMode('${a.id}','buy')">+ 매수</button>
-              <button id="qt_sell_btn_${a.id}" class="btn" style="background:#ff3b3015;color:var(--color-up);padding:6px 14px;transition:.15s;"
-                onclick="setQuickMode('${a.id}','sell')">− 매도</button>
-              <button class="btn btn-ghost" style="padding:6px 10px;"
-                onclick="quickTradeId=null;renderTable()">✕</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button id="tp_buy_${a.id}" class="btn"
+                style="background:#007aff;color:#fff;padding:7px 16px;font-size:13px;
+                       box-shadow:0 2px 8px #007aff30;transition:.15s;"
+                onclick="confirmTrade('${a.id}','buy')">+ 매수</button>
+              <button id="tp_sell_${a.id}" class="btn"
+                style="background:#ff3b3015;color:var(--color-up);padding:7px 16px;font-size:13px;
+                       border:1px solid #ff3b3030;transition:.15s;"
+                onclick="confirmTrade('${a.id}','sell')">− 매도</button>
+              ${isEdit?`<button class="btn" style="background:#34c75920;color:#34c759;padding:7px 14px;font-size:13px;"
+                onclick="saveEditDirect('${a.id}')">✓ 수정저장</button>`:''}
+              <button class="btn btn-ghost" style="padding:7px 12px;font-size:13px;"
+                onclick="closeTradePanel()">✕ 닫기</button>
             </div>
           </div>
-          <div id="qt_status_${a.id}" style="font-size:11px;color:var(--color-secondary);margin-top:6px;min-height:14px;"></div>
-        </td>
-      </tr>`;
-    }
-
-    // 인라인 편집 패널
-    if(editingId===a.id){
-      rows+=`<tr class="inline-edit">
-        <td colspan="11" style="text-align:left;padding:10px 16px">
-          <span style="font-size:12px;color:var(--color-tertiary);margin-right:8px">수량:</span>
-          <input id="ei_qty" type="number" value="${a.quantity}" style="width:90px">
-          <span style="font-size:12px;color:var(--color-tertiary);margin:0 8px">단가(${a.currency}):</span>
-          <input id="ei_avg" type="number" value="${a.avgPrice}" style="width:110px">
-          <button class="btn btn-primary" style="margin-left:10px;padding:6px 16px;font-size:12px;
-            box-shadow:0 2px 8px #007aff40;transition:.15s;"
-            onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'"
-            onclick="saveEdit('${a.id}')">저장</button>
-          <button class="btn btn-ghost" style="margin-left:6px;padding:6px 16px;font-size:12px;
-            border:1px solid var(--color-border);transition:.15s;"
-            onmouseover="this.style.background='#ff3b3015';this.style.color='var(--color-up)'"
-            onmouseout="this.style.background='var(--color-section-bg)';this.style.color='var(--color-text)'"
-            onclick="cancelEdit()">취소</button>
+          <div id="tp_status_${a.id}" style="font-size:11px;color:var(--color-secondary);margin-top:8px;min-height:14px;"></div>
         </td>
       </tr>`;
     }
@@ -917,33 +925,101 @@ function quickSell(id){
   saveAssets(); renderAll();
   setTimeout(()=>{ quickTradeId=null; renderTable(); },2500);
 }
-// 매수/매도 버튼 선택 상태 표시
-let quickMode = {}; // {assetId: 'buy'|'sell'}
-function setQuickMode(id, mode){
-  quickMode[id] = mode;
-  const buyBtn  = document.getElementById(`qt_buy_btn_${id}`);
-  const sellBtn = document.getElementById(`qt_sell_btn_${id}`);
-  if(!buyBtn||!sellBtn) return;
+// 매수/매도 확인 팝업
+let pendingTrade = null;
+
+function confirmTrade(id, mode){
+  const a = assets.find(x=>x.id===id); if(!a) return;
+  const qty   = parseFloat(document.getElementById(`tp_qty_${id}`)?.value);
+  const price = parseFloat(document.getElementById(`tp_price_${id}`)?.value) || a.currentPrice;
+  const st    = document.getElementById(`tp_status_${id}`);
+
+  if(isNaN(qty)||qty<=0){ if(st) st.textContent='❌ 수량을 입력해 주세요.'; return; }
+  if(mode==='sell'&&qty>a.quantity){ if(st) st.textContent=`❌ 보유 수량(${a.quantity.toLocaleString()}주) 초과`; return; }
+
+  pendingTrade = {id, mode, qty, price};
+
+  const sym = CUR_SYM[a.currency];
+  const totalAmt = Math.round(price * qty);
+  const titleEl  = document.getElementById('tc_title');
+  const detailEl = document.getElementById('tc_detail');
+  const confirmBtn = document.getElementById('tc_confirm');
+
   if(mode==='buy'){
-    buyBtn.style.background  = '#007aff';
-    buyBtn.style.color       = '#fff';
-    buyBtn.style.boxShadow   = '0 0 0 3px #007aff40';
-    sellBtn.style.background = '#ff3b3015';
-    sellBtn.style.color      = 'var(--color-up)';
-    sellBtn.style.boxShadow  = 'none';
-    // 매수 실행
-    quickBuy(id);
+    const newAvg = Math.round(((a.avgPrice*a.quantity)+(price*qty))/(a.quantity+qty));
+    titleEl.innerHTML = `<span style="color:#007aff">+ 매수 확인</span>`;
+    detailEl.innerHTML = `
+      <b>${a.name}</b><br>
+      ${qty.toLocaleString()}주 × ${sym}${price.toLocaleString()}<br>
+      총 <b>${sym}${totalAmt.toLocaleString()}</b><br>
+      <span style="color:var(--color-tertiary)">→ 총 ${(a.quantity+qty).toLocaleString()}주 · 평균 ${sym}${newAvg.toLocaleString()}</span>`;
+    confirmBtn.style.background = '#007aff';
+    confirmBtn.textContent = '매수 확인';
   } else {
-    sellBtn.style.background = 'var(--color-up)';
-    sellBtn.style.color      = '#fff';
-    sellBtn.style.boxShadow  = '0 0 0 3px #ff3b3040';
-    buyBtn.style.background  = '#007aff15';
-    buyBtn.style.color       = 'var(--color-accent)';
-    buyBtn.style.boxShadow   = 'none';
-    // 매도 실행
-    quickSell(id);
+    const pnl = Math.round((price - a.avgPrice) * qty);
+    titleEl.innerHTML = `<span style="color:var(--color-up)">− 매도 확인</span>`;
+    detailEl.innerHTML = `
+      <b>${a.name}</b><br>
+      ${qty.toLocaleString()}주 × ${sym}${price.toLocaleString()}<br>
+      총 <b>${sym}${totalAmt.toLocaleString()}</b><br>
+      <span style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">실현손익 ${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</span>`;
+    confirmBtn.style.background = 'var(--color-up)';
+    confirmBtn.textContent = '매도 확인';
   }
+  document.getElementById('tradeConfirmModal').classList.add('open');
 }
+
+function closeTradeConfirm(){
+  document.getElementById('tradeConfirmModal').classList.remove('open');
+  pendingTrade = null;
+}
+
+function executeTrade(){
+  if(!pendingTrade) return;
+  const {id, mode, qty, price} = pendingTrade;
+  const a = assets.find(x=>x.id===id);
+  closeTradeConfirm();
+  if(!a) return;
+
+  const sym = CUR_SYM[a.currency];
+  if(mode==='buy'){
+    const newAvg = ((a.avgPrice*a.quantity)+(price*qty))/(a.quantity+qty);
+    a.avgPrice  = Math.round(newAvg*100)/100;
+    a.quantity += qty;
+    const st = document.getElementById(`tp_status_${id}`);
+    if(st) st.textContent=`✅ ${qty.toLocaleString()}주 매수 → 총 ${a.quantity.toLocaleString()}주`;
+  } else {
+    const pnl = Math.round((price - a.avgPrice) * qty);
+    if(qty===a.quantity){
+      assets = assets.filter(x=>x.id!==id);
+    } else {
+      a.quantity -= qty;
+    }
+    const st = document.getElementById(`tp_status_${id}`);
+    if(st) st.innerHTML=`✅ ${qty.toLocaleString()}주 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`;
+  }
+  saveAssets();renderAll();syncToSheets(true);
+  setTimeout(()=>{ quickTradeId=null; editingId=null; renderTable(); }, 2000);
+}
+
+function closeTradePanel(){
+  quickTradeId=null; editingId=null; renderTable();
+}
+
+// 수정저장 (수량/단가만 직접 변경)
+function saveEditDirect(id){
+  const a = assets.find(x=>x.id===id); if(!a) return;
+  const qty   = parseFloat(document.getElementById(`tp_qty_${id}`)?.value);
+  const price = parseFloat(document.getElementById(`tp_price_${id}`)?.value);
+  if(!isNaN(qty)&&qty>=0)   a.quantity = qty;
+  if(!isNaN(price)&&price>0) a.avgPrice = price;
+  editingId=null; quickTradeId=null;
+  saveAssets();renderAll();syncToSheets(true);
+}
+
+// 매수/매도 시각적 선택 상태 (기존 setQuickMode 대체)
+let quickMode = {};
+function setQuickMode(id, mode){ quickMode[id]=mode; }
 
 function toggleEdit(id){
   // 편집 클릭 시 빠른 매수/매도 패널 닫고 편집 패널 열기
