@@ -1792,15 +1792,66 @@ function drawLineChart(){
     lines.push({label:a.name, vals, firstIdx, color:LINE_COLS[i%LINE_COLS.length], lw:1.5});
   });
   if(!lines.length) return;
-  const allVals=lines.flatMap(l=>l.vals).filter(v=>!isNaN(v)&&v>0);
-  if(!allVals.length) return;
-  const minV=Math.min(...allVals)*0.995,maxV=Math.max(...allVals)*1.005,rng=maxV-minV||1;
+
+  // 합계선과 개별 종목선을 분리해서 각각 Y축 스케일 계산
+  const sumLines  = lines.filter(l=>l.label==='합계');
+  const assetLines= lines.filter(l=>l.label!=='합계');
+
+  // 합계만 있거나 개별만 있는 경우 → 단일 스케일
+  // 합계 + 개별 동시 → 각각 별도 스케일로 두 개 Y축 사용
+  const hasBoth = sumLines.length>0 && assetLines.length>0;
+
+  function getScale(lineGroup){
+    const vals=lineGroup.flatMap(l=>l.vals).filter(v=>v!=null&&!isNaN(v)&&v>0);
+    if(!vals.length) return null;
+    const minV=Math.min(...vals)*0.99;
+    const maxV=Math.max(...vals)*1.01;
+    return{minV,maxV,rng:maxV-minV||1};
+  }
+
+  const sumScale   = sumLines.length   ? getScale(sumLines)   : null;
+  const assetScale = assetLines.length ? getScale(assetLines) : null;
+  const mainScale  = sumScale || assetScale;
+  if(!mainScale) return;
+
   const toX=i=>PAD.l+(chartHistory.length>1?i/(chartHistory.length-1):0.5)*gW;
-  const toY=v=>PAD.t+(1-(v-minV)/rng)*gH;
+  // 합계 → 왼쪽 Y축(mainScale), 개별 → 오른쪽 Y축(assetScale) or 같은 축
+  const toYsum  = v=>PAD.t+(1-(v-mainScale.minV)/mainScale.rng)*gH;
+  const toYasset= hasBoth && assetScale
+    ? v=>PAD.t+(1-(v-assetScale.minV)/assetScale.rng)*gH
+    : toYsum;
+
+  // 그리드
   ctx.strokeStyle='rgba(128,128,128,.1)';ctx.lineWidth=1;
-  for(let r=0;r<=4;r++){const y=PAD.t+(r/4)*gH;ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();}
-  ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='left';
-  for(let r=0;r<=4;r++){const y=PAD.t+(r/4)*gH;ctx.fillText(fmt(maxV-(r/4)*rng),PAD.l+gW+5,y+4);}
+  for(let r=0;r<=4;r++){
+    const y=PAD.t+(r/4)*gH;
+    ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
+  }
+
+  // Y축 레이블 (합계 = 오른쪽, 개별 = 오른쪽 또는 왼쪽)
+  ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';
+  if(hasBoth && assetScale){
+    // 왼쪽: 합계, 오른쪽: 개별 종목
+    ctx.textAlign='left';
+    for(let r=0;r<=4;r++){
+      const y=PAD.t+(r/4)*gH;
+      ctx.fillStyle='#1c1c1e';
+      ctx.fillText(fmt(mainScale.maxV-(r/4)*mainScale.rng),PAD.l+gW+5,y+4);
+    }
+    // 개별 종목 Y축 레이블 (오른쪽 끝)
+    for(let r=0;r<=4;r++){
+      const y=PAD.t+(r/4)*gH;
+      ctx.fillStyle='#8e8e93';
+      ctx.fillText(fmt(assetScale.maxV-(r/4)*assetScale.rng),PAD.l+gW+5,y+14);
+    }
+  } else {
+    ctx.textAlign='left';
+    for(let r=0;r<=4;r++){
+      const y=PAD.t+(r/4)*gH;
+      ctx.fillStyle='#8e8e93';
+      ctx.fillText(fmt(mainScale.maxV-(r/4)*mainScale.rng),PAD.l+gW+5,y+4);
+    }
+  }
   // X축
   ctx.font='10px Pretendard,-apple-system,sans-serif';
   const xT=Math.min(6,chartHistory.length);
@@ -1824,20 +1875,20 @@ function drawLineChart(){
     }
   }
   lines.forEach(line=>{
+    const toY = line.label==='합계' ? toYsum : toYasset;
     ctx.beginPath();
     ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
     let started=false;
     line.vals.forEach((v,i)=>{
-      if(v==null) return; // null이면 건너뜀
+      if(v==null) return;
       if(!started){ ctx.moveTo(toX(i),toY(v)); started=true; }
       else { ctx.lineTo(toX(i),toY(v)); }
     });
     ctx.stroke();
-    // 마지막 유효값에 점 표시
-    const lastValidIdx = [...line.vals].reverse().findIndex(v=>v!=null);
+    const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
     if(lastValidIdx===-1) return;
-    const lastIdx = line.vals.length-1-lastValidIdx;
-    const lx=toX(lastIdx), ly=toY(line.vals[lastIdx]);
+    const lastIdx=line.vals.length-1-lastValidIdx;
+    const lx=toX(lastIdx),ly=toY(line.vals[lastIdx]);
     ctx.beginPath();ctx.arc(lx,ly,4,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
     ctx.beginPath();ctx.arc(lx,ly,2.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
   });
