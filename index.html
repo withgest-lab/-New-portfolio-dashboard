@@ -836,10 +836,10 @@ function renderTable(){
                 style="width:110px;border:1px solid var(--color-border);border-radius:7px;padding:5px 8px;font-size:12px;font-family:inherit;">
             </label>
             <div style="display:flex;gap:6px;">
-              <button class="btn" style="background:#007aff;color:#fff;padding:6px 14px;"
-                onclick="quickBuy('${a.id}')">+ 매수</button>
-              <button class="btn" style="background:#ff3b3015;color:var(--color-up);padding:6px 14px;"
-                onclick="quickSell('${a.id}')">− 매도</button>
+              <button id="qt_buy_btn_${a.id}" class="btn" style="background:#007aff;color:#fff;padding:6px 14px;transition:.15s;"
+                onclick="setQuickMode('${a.id}','buy')">+ 매수</button>
+              <button id="qt_sell_btn_${a.id}" class="btn" style="background:#ff3b3015;color:var(--color-up);padding:6px 14px;transition:.15s;"
+                onclick="setQuickMode('${a.id}','sell')">− 매도</button>
               <button class="btn btn-ghost" style="padding:6px 10px;"
                 onclick="quickTradeId=null;renderTable()">✕</button>
             </div>
@@ -910,7 +910,40 @@ function quickSell(id){
   saveAssets(); renderAll();
   setTimeout(()=>{ quickTradeId=null; renderTable(); },2500);
 }
-function cancelEdit(){editingId=null;renderTable();}
+// 매수/매도 버튼 선택 상태 표시
+let quickMode = {}; // {assetId: 'buy'|'sell'}
+function setQuickMode(id, mode){
+  quickMode[id] = mode;
+  const buyBtn  = document.getElementById(`qt_buy_btn_${id}`);
+  const sellBtn = document.getElementById(`qt_sell_btn_${id}`);
+  if(!buyBtn||!sellBtn) return;
+  if(mode==='buy'){
+    buyBtn.style.background  = '#007aff';
+    buyBtn.style.color       = '#fff';
+    buyBtn.style.boxShadow   = '0 0 0 3px #007aff40';
+    sellBtn.style.background = '#ff3b3015';
+    sellBtn.style.color      = 'var(--color-up)';
+    sellBtn.style.boxShadow  = 'none';
+    // 매수 실행
+    quickBuy(id);
+  } else {
+    sellBtn.style.background = 'var(--color-up)';
+    sellBtn.style.color      = '#fff';
+    sellBtn.style.boxShadow  = '0 0 0 3px #ff3b3040';
+    buyBtn.style.background  = '#007aff15';
+    buyBtn.style.color       = 'var(--color-accent)';
+    buyBtn.style.boxShadow   = 'none';
+    // 매도 실행
+    quickSell(id);
+  }
+}
+
+function toggleEdit(id){
+  // 편집 클릭 시 빠른 매수/매도 패널 닫고 편집 패널 열기
+  quickTradeId = null;
+  editingId = editingId===id ? null : id;
+  renderTable();
+}
 function saveEdit(id){
   const a=assets.find(x=>x.id===id);if(!a)return;
   const qty=parseFloat(document.getElementById('ei_qty').value);
