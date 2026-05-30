@@ -68,11 +68,11 @@ canvas#lineChart{width:100%!important;display:block;}
 .stat-item .stat-sub{font-size:10px;color:var(--color-tertiary);}
 
 /* ── 요약 카드 ── */
-.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
-.sum-card{background:var(--color-card);border-radius:var(--radius);border:1px solid var(--color-border);padding:14px 12px;}
-.sum-card .sum-lbl{font-size:10px;font-weight:600;color:var(--color-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;}
-.sum-card .sum-val{font-size:20px;font-weight:800;letter-spacing:-.04em;}
-.sum-card .sum-sub{font-size:11px;margin-top:3px;}
+.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.sum-card{background:var(--color-card);border-radius:var(--radius);border:1px solid var(--color-border);padding:10px 12px;}
+.sum-card .sum-lbl{font-size:9px;font-weight:600;color:var(--color-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.sum-card .sum-val{font-size:17px;font-weight:800;letter-spacing:-.04em;}
+.sum-card .sum-sub{font-size:10px;margin-top:2px;}
 
 /* ── 테이블 ── */
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -219,6 +219,9 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   <div class="stat-bar" id="statBar"></div>
 </div>
 
+<!-- 1-1. 자산 현황 요약 (그래프 바로 아래) -->
+<div class="summary-grid" id="summaryGrid"></div>
+
 <!-- 2. 자산 목록 -->
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -344,9 +347,6 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   <div class="index-grid" id="indexGrid"></div>
   <div class="notice">※ 야후 파이낸스 기준 (15~20분 지연). 5분마다 자동 갱신됩니다.</div>
 </div>
-
-<!-- 5. 전체 자산 현황 -->
-<div class="summary-grid" id="summaryGrid"></div>
 
 <!-- 6. 스냅샷 이력 -->
 <div class="card">
@@ -1575,24 +1575,30 @@ function renderDonuts(){
 /* ════════════════════════════════════════
    글로벌 지수
 ════════════════════════════════════════ */
+// group: 'us'=미국+BTC, 'kr'=한국, 'fx'=환율
 const INDEX_LIST=[
-  {sym:'^GSPC',    label:'S&P 500',    dec:2,unit:''},
-  {sym:'^IXIC',    label:'NASDAQ',     dec:2,unit:''},
-  {sym:'^DJI',     label:'DOW 30',     dec:2,unit:''},
-  {sym:'^RUT',     label:'Russell 2000',dec:2,unit:''},
-  {sym:'^SOX',     label:'SOX',        dec:2,unit:''},
-  {sym:'^KS11',    label:'KOSPI',      dec:2,unit:''},
-  {sym:'^KQ11',    label:'KOSDAQ',     dec:2,unit:''},
-  {sym:'BTC-USD',  label:'BTC/USD',    dec:0,unit:'$'},
-  {sym:'USDKRW=X', label:'USD/KRW',    dec:1,unit:'₩'},
-  {sym:'JPYKRW=X', label:'JPY/KRW',    dec:2,unit:'₩'},
+  {sym:'^GSPC',    label:'S&P 500',     dec:2,unit:'',  group:'us'},
+  {sym:'^IXIC',    label:'NASDAQ',      dec:2,unit:'',  group:'us'},
+  {sym:'^DJI',     label:'DOW 30',      dec:2,unit:'',  group:'us'},
+  {sym:'^RUT',     label:'Russell 2000',dec:2,unit:'',  group:'us'},
+  {sym:'^SOX',     label:'SOX',         dec:2,unit:'',  group:'us'},
+  {sym:'BTC-USD',  label:'BTC/USD',     dec:0,unit:'$', group:'us'},
+  {sym:'^KS11',    label:'KOSPI',       dec:2,unit:'',  group:'kr'},
+  {sym:'^KQ11',    label:'KOSDAQ',      dec:2,unit:'',  group:'kr'},
+  {sym:'USDKRW=X', label:'USD/KRW',     dec:1,unit:'₩', group:'fx'},
+  {sym:'JPYKRW=X', label:'JPY/KRW',     dec:2,unit:'₩', group:'fx'},
 ];
+const GROUP_BG = {
+  us: 'background:rgba(0,122,255,.06);border-color:rgba(0,122,255,.15);',
+  kr: 'background:rgba(52,199,89,.06);border-color:rgba(52,199,89,.15);',
+  fx: 'background:rgba(255,149,0,.06);border-color:rgba(255,149,0,.15);',
+};
 let indices=INDEX_LIST.map(i=>({...i,val:null,chg:null}));
 
 function renderIndices(){
   document.getElementById('indexGrid').innerHTML=indices.map(idx=>`
-    <div class="index-card">
-      <div class="index-name">${idx.label}</div>
+    <div class="index-card" style="${GROUP_BG[idx.group]||''}">
+      <div class="index-name" style="color:${idx.group==='us'?'#007aff':idx.group==='kr'?'#34c759':'#ff9500'};opacity:.7;">${idx.label}</div>
       <div class="index-val ${idx.val!=null?updn(idx.chg):''}" style="${idx.val==null?'color:var(--color-tertiary)':''}">
         ${idx.val!=null?idx.unit+idx.val.toLocaleString('en-US',{minimumFractionDigits:idx.dec,maximumFractionDigits:idx.dec}):'—'}
       </div>
