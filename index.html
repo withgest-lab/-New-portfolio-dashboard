@@ -1220,6 +1220,14 @@ function delAsset(id){
    매수/매도 탭
 ════════════════════════════════════════ */
 function switchTab(tab){
+  // 탭 이동 시 이전 탭 폼 초기화
+  resetBuyForm();
+  resetSellForm();
+  document.getElementById('cf_name').value='';
+  document.getElementById('cf_amount').value='';
+  document.getElementById('cf_cur').value='KRW';
+  document.getElementById('formStatus').textContent='';
+
   ['buy','sell','cash'].forEach(t=>{
     const form=document.getElementById(`form_${t}`);
     const btn=document.getElementById(`tab_${t}`);
@@ -1234,7 +1242,6 @@ function switchTab(tab){
     btn.style.color     = isActive ? colors[t].active : 'var(--color-tertiary)';
     btn.style.borderBottomColor = isActive ? colors[t].border : 'transparent';
   });
-  document.getElementById('formStatus').textContent='';
 }
 
 /* ════════════════════════════════════════
@@ -1480,69 +1487,75 @@ function drawDonut(canvasId,data){
   const cv=document.getElementById(canvasId);if(!cv)return;
   const ctx=cv.getContext('2d');
   const dpr=window.devicePixelRatio||1;
-  const LW=300,LH=300,cx=150,cy=150,OR=116,IR=70;
+  const LW=260,LH=260,cx=130,cy=130,OR=108,IR=65;
   cv.width=Math.round(LW*dpr);cv.height=Math.round(LH*dpr);
   cv.style.width=LW+'px';cv.style.height=LH+'px';
   ctx.scale(dpr,dpr);ctx.clearRect(0,0,LW,LH);
   const total=data.reduce((s,d)=>s+d.value,0);if(!total)return;
-  let angle=-Math.PI/2;const GAP=0.022;
+  let angle=-Math.PI/2;const GAP=0.018;
   data.forEach(d=>{
     const sw=(d.value/total)*2*Math.PI;
     ctx.beginPath();
     ctx.arc(cx,cy,OR,angle+GAP,angle+sw-GAP);
     ctx.arc(cx,cy,IR,angle+sw-GAP,angle+GAP,true);
     ctx.closePath();ctx.fillStyle=d.color;ctx.fill();
-    if(sw>0.2){
-      const mid=angle+sw/2,cosM=Math.cos(mid),sinM=Math.sin(mid);
-      const isR=cosM>=0;
-      const x1=cx+cosM*(OR+6),y1=cy+sinM*(OR+6);
-      const x2=cx+cosM*(OR+18),y2=cy+sinM*(OR+18);
-      const hLen=sw<0.4?22:14;
-      const x3=x2+(isR?hLen:-hLen),y3=y2;
-      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.lineTo(x3,y3);
-      ctx.strokeStyle=d.color;ctx.lineWidth=1.2;ctx.stroke();
-      const tx=x3+(isR?4:-4);
-      ctx.textAlign=isR?'left':'right';
-      const pct=((d.value/total)*100).toFixed(1)+'%';
-      const fv=fmt(d.value);
+    // 섹터가 충분히 크면 % 텍스트만 안에 표시
+    if(sw>0.35){
+      const mid=angle+sw/2;
+      const tx=cx+Math.cos(mid)*(IR+OR)/2;
+      const ty=cy+Math.sin(mid)*(IR+OR)/2;
       ctx.font=`bold 11px Pretendard,-apple-system,sans-serif`;
-      const pw=ctx.measureText(pct).width;
-      ctx.font=`10px Pretendard,-apple-system,sans-serif`;
-      const vw=ctx.measureText(fv).width;
-      const maxW=Math.max(pw,vw);
-      let ftx=tx;
-      if(!isR) ftx=Math.max(ftx,maxW+4);
-      else ftx=Math.min(ftx,LW-maxW-4);
-      ctx.font=`bold 11px Pretendard,-apple-system,sans-serif`;
-      ctx.fillStyle='#1c1c1e';ctx.fillText(pct,ftx,y3-2);
-      ctx.font=`10px Pretendard,-apple-system,sans-serif`;
-      ctx.fillStyle='#636366';ctx.fillText(fv,ftx,y3+11);
+      ctx.fillStyle='#fff';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText(((d.value/total)*100).toFixed(1)+'%',tx,ty);
     }
     angle+=sw;
   });
   ctx.beginPath();ctx.arc(cx,cy,IR-2,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
 }
 
 function renderDonuts(){
   const total=totalEv();
   const catMap={};
   assets.forEach(a=>{const k=donutCatKey(a);catMap[k]=(catMap[k]||0)+evKRW(a);});
-  const catData=Object.entries(catMap).map(([k,v])=>({label:DONUT_CAT_LABELS[k]||k,value:v,color:DONUT_CAT_COLS[k]||'#ccc'})).sort((a,b)=>b.value-a.value);
+  const catData=Object.entries(catMap)
+    .map(([k,v])=>({label:DONUT_CAT_LABELS[k]||k,value:v,color:DONUT_CAT_COLS[k]||'#ccc'}))
+    .sort((a,b)=>b.value-a.value);
+
   drawDonut('catDonut',catData);
   document.getElementById('catCenter').textContent=fmt(total);
-  document.getElementById('catLegend').innerHTML=catData.map(d=>`
-    <div style="display:flex;align-items:center;gap:5px;font-size:12px;">
-      <div style="width:10px;height:10px;border-radius:50%;background:${d.color};flex-shrink:0;"></div>
-      <span style="color:var(--color-secondary)">${d.label} ${total>0?((d.value/total)*100).toFixed(1):0}%</span>
-    </div>`).join('');
+
+  // legend: 색상 동그라미 + 카테고리명 + % + 금액 (2열 그리드)
+  document.getElementById('catLegend').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;width:100%;max-width:280px;">
+      ${catData.map(d=>`
+        <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+          <div style="width:10px;height:10px;border-radius:50%;background:${d.color};flex-shrink:0;"></div>
+          <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            <span style="color:var(--color-text);font-weight:600;">${d.label}</span>
+            <span style="color:var(--color-tertiary);margin-left:4px;">${total>0?((d.value/total)*100).toFixed(1):0}%</span><br>
+            <span style="color:var(--color-secondary);font-size:10px;">${fmt(d.value)}</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  // 막대 그래프: 전체 총자산 대비 % 기준으로 막대 너비 결정
   const assetData=assets.map((a,i)=>({label:a.name,value:evKRW(a),color:ASSET_COLS[i%ASSET_COLS.length]})).sort((a,b)=>b.value-a.value);
-  const maxVal=assetData[0]?.value||1;
-  document.getElementById('barChart').innerHTML=assetData.map(d=>`
-    <div class="bar-row">
+  document.getElementById('barChart').innerHTML=assetData.map(d=>{
+    const pct=total>0?(d.value/total)*100:0;
+    return`<div class="bar-row">
       <div class="bar-label">${d.label}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(d.value/maxVal)*100}%;background:${d.color};"></div></div>
-      <div class="bar-pct" style="color:${d.color}">${total>0?((d.value/total)*100).toFixed(1):0}%  ${fmt(d.value)}</div>
-    </div>`).join('');
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${pct}%;background:${d.color};"></div>
+      </div>
+      <div class="bar-pct" style="color:${d.color}">
+        <span style="font-weight:700;">${pct.toFixed(1)}%</span>
+        <span style="font-size:10px;color:var(--color-tertiary);margin-left:4px;">${fmt(d.value)}</span>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 /* ════════════════════════════════════════
