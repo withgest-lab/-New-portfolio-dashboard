@@ -1780,7 +1780,8 @@ function drawLineChart(){
       const jump=curr-prev;
       if(Math.abs(jump)>=4) events.push({idx:j,type:jump>0?'buy':'sell',jump});
     }
-    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:LINE_COLS[i%LINE_COLS.length],lw:1.0,assetId:a.id,events});
+    const lineColor = a.category==='cash' ? '#82E0AA' : LINE_COLS[i%LINE_COLS.length];
+    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:lineColor,lw:1.0,assetId:a.id,events});
   });
   if(!lines.length) return;
 
@@ -1825,17 +1826,17 @@ function drawLineChart(){
     ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
   }
 
-  // 이상치 있으면 물결 브레이크 표시 (상단/하단)
+  // 이상치 있으면 물결 브레이크 표시 (상단 얇게)
   if(hasOutlier){
-    const bY=PAD.t+8;
-    ctx.strokeStyle='rgba(150,150,150,.5)';ctx.lineWidth=1.5;
-    for(let x=PAD.l;x<PAD.l+gW;x+=8){
+    const bY=PAD.t+4;
+    ctx.strokeStyle='rgba(150,150,150,.35)';ctx.lineWidth=1;
+    for(let x=PAD.l;x<PAD.l+gW;x+=6){
       ctx.beginPath();
-      ctx.moveTo(x,bY);ctx.lineTo(x+4,bY-4);ctx.lineTo(x+8,bY);
+      ctx.moveTo(x,bY);ctx.lineTo(x+3,bY-3);ctx.lineTo(x+6,bY);
       ctx.stroke();
     }
-    ctx.fillStyle='#8e8e93';ctx.font='9px Pretendard,-apple-system,sans-serif';
-    ctx.textAlign='left';ctx.fillText('※ 이상치 클리핑',PAD.l+2,bY-6);
+    ctx.fillStyle='rgba(142,142,147,.7)';ctx.font='9px Pretendard,-apple-system,sans-serif';
+    ctx.textAlign='left';ctx.fillText('≈ 이상치 클리핑',PAD.l+2,bY+9);
   }
 
   // Y축 레이블
@@ -1914,7 +1915,7 @@ function drawLineChart(){
       });
     }
 
-    // 끝점 원 + 레이블
+    // 끝점 원 + 레이블 (겹침 방지)
     const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
     if(lastValidIdx===-1) return;
     const lastIdx=line.vals.length-1-lastValidIdx;
@@ -1922,10 +1923,34 @@ function drawLineChart(){
     const lx=toX(lastIdx),ly=toY(lastPct);
     ctx.beginPath();ctx.arc(lx,ly,3,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
     ctx.beginPath();ctx.arc(lx,ly,1.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
-    const label=(lastPct>=0?'+':'')+lastPct.toFixed(1)+'%';
-    ctx.font='bold 10px Pretendard,-apple-system,sans-serif';
+    // 레이블은 나중에 겹침 보정 후 그림
+    line._lx=lx;line._ly=ly;line._lastPct=lastPct;
+  });
+
+  // ── 끝 레이블 겹침 방지: Y 위치 정렬 ──
+  const labeled=lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
+  const LABEL_H=13; // 레이블 최소 간격
+  for(let i=1;i<labeled.length;i++){
+    if(labeled[i]._ly-labeled[i-1]._adjLy<LABEL_H){
+      labeled[i]._adjLy=labeled[i-1]._adjLy+LABEL_H;
+    } else {
+      labeled[i]._adjLy=labeled[i]._ly;
+    }
+    labeled[0]._adjLy=labeled[0]._ly;
+  }
+  labeled.forEach(line=>{
+    if(line._ly==null) return;
+    const adjLy=line._adjLy??line._ly;
+    const label=(line._lastPct>=0?'+':'')+line._lastPct.toFixed(1)+'%';
+    ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
     ctx.fillStyle=line.color;ctx.textAlign='left';
-    ctx.fillText(label,Math.min(lx+5,W-PAD.r+2),ly+4);
+    // 연결선 (끝점→레이블)
+    if(Math.abs(adjLy-line._ly)>3){
+      ctx.strokeStyle=line.color;ctx.lineWidth=0.5;ctx.setLineDash([2,2]);
+      ctx.beginPath();ctx.moveTo(line._lx+4,line._ly);ctx.lineTo(line._lx+6,adjLy);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillText(label,Math.min(line._lx+7,W-PAD.r+2),adjLy+3);
   });
 }
 
@@ -1948,7 +1973,7 @@ function renderStatBar(){
     const hi=Math.max(...vals),lo=Math.min(...vals);
     const diff=last-first,pct=first>0?(diff/first)*100:0;
     const color=a?LINE_COLS[assets.indexOf(a)%LINE_COLS.length]:'#1c1c1e';
-    const itemColor=a?LINE_COLS[assets.indexOf(a)%LINE_COLS.length]:'#555';
+    const itemColor=a?(a.category==='cash'?'#82E0AA':LINE_COLS[assets.indexOf(a)%LINE_COLS.length]):'#555';
     return'<div class="stat-item">'+
       '<div class="stat-lbl" style="color:'+itemColor+';font-weight:700;">'+(a?a.name:'합계')+'</div>'+
       '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
@@ -1965,10 +1990,12 @@ function renderToggles(){
     `<button class="toggle-ctrl" onclick="toggleAll()" style="background:${allSelected?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected?'#fff':'var(--color-text)'}">
       ${allSelected?'전체 해제':'전체 선택'}</button>
     <button class="toggle-ctrl" onclick="toggleSum()" style="background:${showSum?'var(--color-accent)':'var(--color-section-bg)'};color:${showSum?'#fff':'var(--color-text)'}">합계</button>`
-    +assets.map((a,i)=>`
-    <button class="toggle-pill ${selectedAssets.has(a.id)?'on':''}"
-      style="background:${LINE_COLS[i%LINE_COLS.length]}18;color:${LINE_COLS[i%LINE_COLS.length]};border-color:${selectedAssets.has(a.id)?LINE_COLS[i%LINE_COLS.length]:'transparent'};"
-      onclick="toggleAsset('${a.id}')">${a.name}</button>`).join('');
+    +assets.map((a,i)=>{
+      const col=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
+      return`<button class="toggle-pill ${selectedAssets.has(a.id)?'on':''}"
+        style="background:${col}18;color:${col};border-color:${selectedAssets.has(a.id)?col:'transparent'};"
+        onclick="toggleAsset('${a.id}')">${a.name}</button>`;
+    }).join('');
 }
 function toggleAsset(id){
   selectedAssets.has(id)?selectedAssets.delete(id):selectedAssets.add(id);
