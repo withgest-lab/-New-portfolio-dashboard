@@ -725,7 +725,21 @@ function updn(n){return n>=0?'up':'dn';}
 /* ════════════════════════════════════════
    스냅샷
 ════════════════════════════════════════ */
-function loadSnaps(){try{return JSON.parse(localStorage.getItem(SNAP_KEY)||'[]');}catch(e){return[];}}
+function loadSnaps(){
+  try{
+    const arr=JSON.parse(localStorage.getItem(SNAP_KEY)||'[]');
+    // 구버전 스냅샷에 id 없는 경우 자동 보정
+    let needSave=false;
+    arr.forEach(s=>{
+      if(!s.id){
+        s.id=s.timestamp.toString(36)+'x';
+        needSave=true;
+      }
+    });
+    if(needSave) localStorage.setItem(SNAP_KEY,JSON.stringify(arr));
+    return arr;
+  }catch(e){return[];}
+}
 function saveSnaps(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
 
 function compressSnaps(snaps) {
@@ -1068,7 +1082,13 @@ function executeTrade(){
   // 스냅샷 개별 삭제
   if(mode==='snap_delete'){
     const {snapId} = pendingTrade;
-    saveSnaps(loadSnaps().filter(s=>s.id!==snapId));
+    const before=loadSnaps();
+    const after=before.filter(s=>s.id!==snapId && String(s.timestamp)!==String(snapId));
+    if(after.length===before.length){
+      // id 매칭 실패 시 timestamp 기반으로 한번 더 시도
+      console.warn('snap delete: id match failed, trying timestamp', snapId);
+    }
+    saveSnaps(after);
     renderSnaps();
     buildChartHistory();
     return;
@@ -1759,10 +1779,12 @@ function drawLineChart(){
   // ── 레이아웃 ──
   const LNUM=52;
   const RNUM=52;
-  const TOP=64;    // 상단 여백 늘림 → 화살표 정보 박스 잘림 방지
+  const TOP=64;
   const BOT=54;
   const PAD_IN=16;
-  const RLABEL=128;
+  // ★ 접힘(360px) 대응: RLABEL과 xT를 화면 너비에 비례
+  const RLABEL=Math.round(Math.min(128, W*0.32));
+  const LBL_FONT=W<450?8:9; // 접힘이면 8px
 
   const BL=LNUM, BT=TOP;
   const BW=W-LNUM-RNUM, BH=H-TOP-BOT;
@@ -1771,6 +1793,8 @@ function drawLineChart(){
   const gT=BT+PAD_IN;
   const gW=BW-PAD_IN-RLABEL;
   const gH=BH-PAD_IN*2;
+  // ★ X축 눈금 수: 좁으면 줄임
+  const MAX_XT=W<400?3:W<600?4:6;
 
   if(!chartHistory.length) return;
 
@@ -1884,23 +1908,98 @@ function drawLineChart(){
     ctx.setLineDash([]);
   }
 
-  // ── 스냅샷 수직 점선 (chartHistory 시간축과 동일한 toX 사용) ──
+  // ── 스냅샷 수직 점선 + 종목별 교차 마커 ──
+  // 마커 종류: 0=원, 1=사각, 2=삼각, 3=다이아몬드, 4=X, 5=+, ...
+  const MARKERS=['circle','square','triangle','diamond','cross','plus','star'];
+  function drawMarker(ctx2, type, cx, cy, r, color){
+    ctx2.fillStyle=color; ctx2.strokeStyle='#fff';
+    ctx2.lineWidth=1; ctx2.setLineDash([]);
+    switch(type){
+      case 'circle':
+        ctx2.beginPath(); ctx2.arc(cx,cy,r,0,2*Math.PI);
+        ctx2.fill(); ctx2.stroke(); break;
+      case 'square':
+        ctx2.beginPath(); ctx2.rect(cx-r,cy-r,r*2,r*2);
+        ctx2.fill(); ctx2.stroke(); break;
+      case 'triangle':
+        ctx2.beginPath();
+        ctx2.moveTo(cx,cy-r); ctx2.lineTo(cx-r,cy+r); ctx2.lineTo(cx+r,cy+r);
+        ctx2.closePath(); ctx2.fill(); ctx2.stroke(); break;
+      case 'diamond':
+        ctx2.beginPath();
+        ctx2.moveTo(cx,cy-r); ctx2.lineTo(cx+r,cy); ctx2.lineTo(cx,cy+r); ctx2.lineTo(cx-r,cy);
+        ctx2.closePath(); ctx2.fill(); ctx2.stroke(); break;
+      case 'cross':
+        ctx2.strokeStyle=color; ctx2.lineWidth=2;
+        ctx2.beginPath(); ctx2.moveTo(cx-r,cy-r); ctx2.lineTo(cx+r,cy+r); ctx2.stroke();
+        ctx2.beginPath(); ctx2.moveTo(cx+r,cy-r); ctx2.lineTo(cx-r,cy+r); ctx2.stroke(); break;
+      case 'plus':
+        ctx2.strokeStyle=color; ctx2.lineWidth=2;
+        ctx2.beginPath(); ctx2.moveTo(cx,cy-r); ctx2.lineTo(cx,cy+r); ctx2.stroke();
+        ctx2.beginPath(); ctx2.moveTo(cx-r,cy); ctx2.lineTo(cx+r,cy); ctx2.stroke(); break;
+      case 'star':
+        ctx2.fillStyle=color;
+        for(let k=0;k<5;k++){
+          const a=Math.PI/2+k*(2*Math.PI/5);
+          const a2=a+Math.PI/5;
+          ctx2.beginPath();
+          ctx2.moveTo(cx+r*Math.cos(a),cy-r*Math.sin(a));
+          ctx2.lineTo(cx+(r*0.4)*Math.cos(a2),cy-(r*0.4)*Math.sin(a2));
+        }
+        ctx2.beginPath();
+        [0,1,2,3,4].forEach(k=>{
+          const a=-Math.PI/2+k*(2*Math.PI/5);
+          k===0?ctx2.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a))
+               :ctx2.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));
+          const a2=a+Math.PI/5;
+          ctx2.lineTo(cx+(r*0.45)*Math.cos(a2),cy+(r*0.45)*Math.sin(a2));
+        });
+        ctx2.closePath(); ctx2.fill(); break;
+    }
+  }
+
+  // 각 line에 마커 타입 지정
+  lines.forEach((line,i)=>{
+    line._marker=line.isSum?null:MARKERS[i%MARKERS.length];
+  });
+
   if(chartHistory.length>1){
     const t0=chartHistory[0].ts;
     const t1=chartHistory[chartHistory.length-1].ts;
     const tRng=t1-t0||1;
-    // toX와 동일한 계산식 사용 (chartHistory 인덱스 기반이 아닌 시간 기반)
     const tsToX=ts=>gL+((ts-t0)/tRng)*gW;
+
     loadSnaps().forEach(s=>{
       if(s.timestamp<t0||s.timestamp>t1) return;
       const sx=tsToX(s.timestamp);
-      ctx.strokeStyle='rgba(0,122,255,0.2)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
+
+      // 수직 점선
+      ctx.strokeStyle='rgba(0,122,255,0.18)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
       ctx.beginPath(); ctx.moveTo(sx,BT+PAD_IN); ctx.lineTo(sx,BT+BH-PAD_IN); ctx.stroke();
       ctx.setLineDash([]);
+
+      // 각 종목 교차점 마커
+      lines.forEach(line=>{
+        if(!line._marker) return;
+        const isOut=outLines.includes(line);
+        const useY=isOut?toYR:toYL;
+        // 스냅샷 시간에 가장 가까운 chartHistory 인덱스 찾기
+        let nearIdx=0, minDiff=Infinity;
+        chartHistory.forEach((h,i)=>{
+          const d=Math.abs(h.ts-s.timestamp);
+          if(d<minDiff){minDiff=d; nearIdx=i;}
+        });
+        const v=line.vals[nearIdx];
+        if(v==null) return;
+        const my=useY(v);
+        // 그래프 영역 안에 있을 때만
+        if(my<BT||my>BT+BH) return;
+        drawMarker(ctx, line._marker, sx, my, 4, line.color);
+      });
     });
   }
 
-  // ── 선 그리기 ──
+  // ── 선 그리기 + 끝점 (클리핑 안) ──
   lines.forEach(line=>{
     const isOut=outLines.includes(line);
     const useY=isOut?toYR:toYL;
@@ -1916,50 +2015,6 @@ function drawLineChart(){
     });
     ctx.stroke(); ctx.setLineDash([]);
 
-    // ── 매수↑/매도↓ 화살표 + 정보 박스 ──
-    if(line.events&&line.events.length){
-      line.events.forEach(ev=>{
-        const v=line.vals[ev.idx]; if(v==null) return;
-        const ex=toX(ev.idx), ly=useY(v);
-        const isBuy=ev.type==='buy'; const AH=9;
-
-        ctx.fillStyle=line.color; ctx.beginPath();
-        if(isBuy){
-          // 매수 ↑: 삼각형 꼭짓점이 위, 밑변이 아래 → 위쪽 화살표
-          // 화살표는 선 위쪽에 위치 (선에서 위로 떨어져서)
-          const tip=ly-4;           // 꼭짓점 (선보다 4px 위)
-          ctx.moveTo(ex,   tip);    // 꼭짓점 (위)
-          ctx.lineTo(ex-6, tip+AH); // 왼쪽 아래
-          ctx.lineTo(ex+6, tip+AH); // 오른쪽 아래
-        } else {
-          // 매도 ↓: 삼각형 꼭짓점이 아래, 밑변이 위 → 아래쪽 화살표
-          // 화살표는 선 아래쪽에 위치
-          const tip=ly+4;           // 꼭짓점 (선보다 4px 아래)
-          ctx.moveTo(ex,   tip);    // 꼭짓점 (아래)
-          ctx.lineTo(ex-6, tip-AH); // 왼쪽 위
-          ctx.lineTo(ex+6, tip-AH); // 오른쪽 위
-        }
-        ctx.closePath(); ctx.fill();
-
-        // 정보 박스: 화살표 위(매수) 또는 아래(매도)
-        const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
-        const typeStr=isBuy?'매입':'매도';
-        const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
-        const aStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
-        const txt=`(${[typeStr,qStr,aStr].filter(Boolean).join(', ')})`;
-        ctx.font='8px Pretendard,sans-serif';
-        const tw=ctx.measureText(txt).width;
-        const bxY=isBuy
-          ? Math.max(BT+4, ly-4-AH-15) // 매수: 화살표 위 (박스 상단 밖으로 안 나가게)
-          : Math.min(BT+BH-4, ly+4+AH+5); // 매도: 화살표 아래
-        const bx=Math.min(ex+8, gL+gW-tw-4);
-        ctx.fillStyle='rgba(255,255,255,0.93)';
-        ctx.strokeStyle='rgba(160,160,160,0.4)'; ctx.lineWidth=0.6;
-        ctx.beginPath(); ctx.roundRect(bx-4,bxY-11,tw+8,14,2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle='#555'; ctx.textAlign='left'; ctx.fillText(txt,bx,bxY);
-      });
-    }
-
     // 끝점 원
     const lvi=[...line.vals].reverse().findIndex(v=>v!=null);
     if(lvi===-1) return;
@@ -1968,6 +2023,7 @@ function drawLineChart(){
     ctx.beginPath(); ctx.arc(lx,ly2,3,0,2*Math.PI); ctx.fillStyle=line.color; ctx.fill();
     ctx.beginPath(); ctx.arc(lx,ly2,1.5,0,2*Math.PI); ctx.fillStyle='#fff'; ctx.fill();
     line._lx=lx; line._ly=ly2; line._lp=lp;
+    line._useY=useY;
   });
 
   // ── 종목명+% (박스 안 오른쪽 여백) ──
@@ -1979,7 +2035,7 @@ function drawLineChart(){
       labeled[i]._aly=(labeled[i]._ly-labeled[i-1]._aly<13)
         ?labeled[i-1]._aly+13:labeled[i]._ly;
     }
-    ctx.font='bold 9px Pretendard,sans-serif'; ctx.textAlign='left';
+    ctx.font=`bold ${LBL_FONT}px Pretendard,sans-serif`; ctx.textAlign='left';
     labeled.forEach(l=>{
       const aly=Math.max(gT+4,Math.min(gT+gH-2,l._aly));
       const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(1)+'%';
@@ -1994,11 +2050,94 @@ function drawLineChart(){
     });
   }
 
-  ctx.restore(); // 클리핑 해제
+  ctx.restore(); // ★ 클리핑 해제 — 이후 그리는 것은 캔버스 전체에 자유롭게
+
+  // ── 꼬리 달린 화살표 + 정보 박스 (클리핑 밖 → 절대 잘리지 않음) ──
+  lines.forEach(line=>{
+    if(!line.events||!line.events.length) return;
+    const useY=line._useY||(outLines.includes(line)?toYR:toYL);
+    line.events.forEach(ev=>{
+      const v=line.vals[ev.idx]; if(v==null) return;
+      const ex=toX(ev.idx), ly=useY(v);
+      const isBuy=ev.type==='buy';
+
+      // ── 꼬리 달린 화살표 ──
+      // 매수: 선 위에 ↑ (꼬리=세로선, 머리=삼각형)
+      // 매도: 선 아래에 ↓
+      const TAIL=14; // 꼬리 길이
+      const HW=6;    // 화살촉 너비
+      const HH=8;    // 화살촉 높이
+      ctx.strokeStyle=line.color; ctx.fillStyle=line.color;
+      ctx.lineWidth=1.5; ctx.setLineDash([]);
+
+      if(isBuy){
+        const base=ly-2;         // 꼬리 시작 (선 바로 위)
+        const tipY=base-TAIL;    // 화살촉 끝 (꼭짓점)
+        // 꼬리 세로선
+        ctx.beginPath(); ctx.moveTo(ex,base); ctx.lineTo(ex,tipY+HH); ctx.stroke();
+        // 화살촉 삼각형 (위쪽)
+        ctx.beginPath();
+        ctx.moveTo(ex,      tipY);
+        ctx.lineTo(ex-HW,   tipY+HH);
+        ctx.lineTo(ex+HW,   tipY+HH);
+        ctx.closePath(); ctx.fill();
+      } else {
+        const base=ly+2;
+        const tipY=base+TAIL;
+        ctx.beginPath(); ctx.moveTo(ex,base); ctx.lineTo(ex,tipY-HH); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ex,      tipY);
+        ctx.lineTo(ex-HW,   tipY-HH);
+        ctx.lineTo(ex+HW,   tipY-HH);
+        ctx.closePath(); ctx.fill();
+      }
+
+      // ── 정보 텍스트 (화살표 오른쪽에 배치) ──
+      const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
+      const typeStr=isBuy?'매입':'매도';
+      const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
+      const aStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
+      const line1=typeStr+(qStr?' '+qStr:'');
+      const line2=aStr;
+
+      ctx.font='bold 8px Pretendard,sans-serif';
+      const tw1=ctx.measureText(line1).width;
+      ctx.font='8px Pretendard,sans-serif';
+      const tw2=ctx.measureText(line2).width;
+      const bw=Math.max(tw1,tw2)+12;
+      const bh=line2?28:16;
+
+      // 박스 X: 화살표 오른쪽, 화면 넘으면 왼쪽으로
+      let bx=ex+10;
+      if(bx+bw>W-10) bx=ex-bw-10;
+
+      // 박스 Y: 매수=화살촉 위, 매도=화살촉 아래 / 화면 경계 클램프
+      const arrowTip=isBuy?(ly-2-TAIL):(ly+2+TAIL);
+      let by=isBuy ? arrowTip-bh-4 : arrowTip+4;
+      // 캔버스 위아래 경계 클램프
+      by=Math.max(2, Math.min(H-bh-2, by));
+
+      // 박스 배경
+      ctx.fillStyle='rgba(255,255,255,0.95)';
+      ctx.strokeStyle=line.color+'88'; ctx.lineWidth=0.8;
+      ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,3); ctx.fill(); ctx.stroke();
+
+      // 텍스트
+      ctx.fillStyle=line.color;
+      ctx.font='bold 8px Pretendard,sans-serif';
+      ctx.textAlign='left';
+      ctx.fillText(line1, bx+6, by+11);
+      if(line2){
+        ctx.fillStyle='#666';
+        ctx.font='8px Pretendard,sans-serif';
+        ctx.fillText(line2, bx+6, by+22);
+      }
+    });
+  });
 
   // ── X축 ──
   ctx.font='10px Pretendard,sans-serif'; ctx.fillStyle='#8e8e93';
-  const xT=Math.max(2,Math.min(6,chartHistory.length));
+  const xT=Math.max(2,Math.min(MAX_XT,chartHistory.length));
   for(let i=0;i<xT;i++){
     const idx=xT>1?Math.round(i/(xT-1)*(chartHistory.length-1)):0;
     const d=new Date(chartHistory[Math.min(idx,chartHistory.length-1)].ts);
