@@ -62,8 +62,9 @@ body{background:var(--color-section-bg);color:var(--color-text);font-size:14px;l
 /* ── 차트 ── */
 .chart-wrap{margin-top:10px;}
 canvas#lineChart{width:100%!important;display:block;}
-.stat-bar{display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;}
-.stat-item .stat-lbl{font-size:10px;color:var(--color-tertiary);}
+.stat-bar{margin-top:12px;}
+.stat-item{min-width:120px;}
+.stat-item .stat-lbl{font-size:10px;font-weight:600;color:var(--color-tertiary);}
 .stat-item .stat-val{font-size:13px;font-weight:700;}
 .stat-item .stat-sub{font-size:10px;color:var(--color-tertiary);}
 
@@ -1705,52 +1706,21 @@ function buildSnapshotHistory(period){
 
   const history=[];
   if(beforeStart){
-    // period 시작 전 스냅샷이 있으면 → period 시작점(1/1 등)에서 시작
+    // period 시작 전 스냅샷이 있으면 → period 시작점에서 시작
     history.push({ts:startTs,byAsset:snapToByAsset(beforeStart),total:beforeStart.totalValue});
+    // 기간 내 스냅샷 추가
+    snaps.forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
   } else if(snaps.length){
     // period 시작 전 데이터 없으면 → 첫 스냅샷 시각을 실제 시작점으로 사용
+    // 첫 스냅샷은 시작점으로 1번만 push
     history.push({ts:snaps[0].timestamp,byAsset:snapToByAsset(snaps[0]),total:snaps[0].totalValue});
+    // 나머지 스냅샷 추가 (첫 번째 제외)
+    snaps.slice(1).forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
   }
-  snaps.forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
   history.push({ts:Date.now(),byAsset:nowByAsset,total:nowTotal});
   return history;
 }
 
-async function fetch1DIntraday(){
-  const start=getPeriodStart('1D');
-  const startTs=Math.floor(start.getTime()/1000);
-  const endTs=Math.floor(Date.now()/1000);
-  const results=await Promise.allSettled(assets.map(async a=>{
-    if(a.ticker==='—') return{id:a.id,points:[]};
-    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${a.ticker}?interval=5m&range=2d`;
-    const json=await yahooFetch(url);
-    const result=json?.chart?.result?.[0];
-    if(!result) return{id:a.id,points:[]};
-    const timestamps=result.timestamp||[];
-    const closes=result.indicators?.quote?.[0]?.close||[];
-    const points=[];
-    timestamps.forEach((ts,i)=>{if(ts>=startTs&&ts<=endTs&&closes[i]!=null)points.push({ts:ts*1000,price:closes[i]});});
-    return{id:a.id,points};
-  }));
-  const allTs=new Set();
-  results.forEach(r=>{if(r.status==='fulfilled')r.value.points.forEach(p=>allTs.add(p.ts));});
-  const sortedTs=[...allTs].sort((a,b)=>a-b);
-  if(!sortedTs.length) return null;
-  const history=sortedTs.map(ts=>{
-    const byAsset={};
-    results.forEach((r,i)=>{
-      if(r.status!=='fulfilled') return;
-      const a=assets[i];const pts=r.value.points;
-      let price=null;
-      for(let j=pts.length-1;j>=0;j--){if(pts[j].ts<=ts){price=pts[j].price;break;}}
-      if(price==null&&pts.length) price=pts[0].price;
-      if(price!=null) byAsset[a.id]=Math.round(toKRW(a,price)*a.quantity);
-    });
-    return{ts,byAsset};
-  });
-  if(history.length){const last=history[history.length-1];assets.forEach(a=>{last.byAsset[a.id]=Math.round(evKRW(a));});}
-  return history;
-}
 
 function setPeriod(p){
   currentPeriod=p;
@@ -1768,158 +1738,149 @@ async function buildChartHistory(){
 function drawLineChart(){
   const cv=document.getElementById('lineChart');
   const dpr=window.devicePixelRatio||1;
-  const W=cv.parentElement.clientWidth||900,H=260;
+  const W=cv.parentElement.clientWidth||900,H=280;
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
   cv.style.width=W+'px';cv.style.height=H+'px';
   const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
-  const PAD={t:14,r:80,b:52,l:14};
+  const PAD={t:20,r:60,b:52,l:46}; // r을 60으로 늘려 끝 레이블 여유
   const gW=W-PAD.l-PAD.r,gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
+
+  // % 변화율: 각 선의 첫 유효값 대비
   const lines=[];
-  if(showSum) lines.push({
-    label:'합계',
-    vals:chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0)),
-    color:'#1c1c1e',lw:2.5
-  });
+  if(showSum){
+    const rawVals=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
+    const firstVal=rawVals.find(v=>v>0)||1;
+    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:2.5});
+  }
   assets.forEach((a,i)=>{
     if(!selectedAssets.has(a.id)) return;
-    // 해당 종목이 처음 등장하는 인덱스 찾기 (null/0 이전은 그리지 않음)
-    const rawVals = chartHistory.map(h=>h.byAsset[a.id]??null);
-    const firstIdx = rawVals.findIndex(v=>v!=null&&v>0);
+    const rawVals=chartHistory.map(h=>h.byAsset[a.id]??null);
+    const firstIdx=rawVals.findIndex(v=>v!=null&&v>0);
     if(firstIdx===-1) return;
-    // 첫 등장 이전은 null 유지 (그래프에서 해당 구간 건너뜀)
-    const vals = rawVals.map((v,i)=> i<firstIdx ? null : (v||0));
-    lines.push({label:a.name, vals, firstIdx, color:LINE_COLS[i%LINE_COLS.length], lw:1.5});
+    const firstVal=rawVals[firstIdx];
+    const pctVals=rawVals.map((v,idx)=>idx<firstIdx?null:(v!=null?((v-firstVal)/firstVal)*100:null));
+    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:LINE_COLS[i%LINE_COLS.length],lw:1.8});
   });
   if(!lines.length) return;
 
-  // 합계선과 개별 종목선을 분리해서 각각 Y축 스케일 계산
-  const sumLines  = lines.filter(l=>l.label==='합계');
-  const assetLines= lines.filter(l=>l.label!=='합계');
+  const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
+  if(!allPct.length) return;
+  const minP=Math.min(...allPct),maxP=Math.max(...allPct);
+  const pad=(maxP-minP)*0.15||1.0; // 패딩 넉넉히
+  const minV=minP-pad,maxV=maxP+pad,rng=maxV-minV||1;
 
-  // 합계만 있거나 개별만 있는 경우 → 단일 스케일
-  // 합계 + 개별 동시 → 각각 별도 스케일로 두 개 Y축 사용
-  const hasBoth = sumLines.length>0 && assetLines.length>0;
+  // ① xT=1 방어
+  const toX=i=>chartHistory.length>1
+    ? PAD.l+(i/(chartHistory.length-1))*gW
+    : PAD.l+gW*0.5;
+  const toY=v=>PAD.t+(1-(v-minV)/rng)*gH;
 
-  function getScale(lineGroup){
-    const vals=lineGroup.flatMap(l=>l.vals).filter(v=>v!=null&&!isNaN(v)&&v>0);
-    if(!vals.length) return null;
-    const minV=Math.min(...vals)*0.99;
-    const maxV=Math.max(...vals)*1.01;
-    return{minV,maxV,rng:maxV-minV||1};
+  // ② 0% 기준선 (범위 안에 있을 때만)
+  if(minV<=0&&maxV>=0){
+    const zeroY=toY(0);
+    ctx.strokeStyle='rgba(128,128,128,.3)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.moveTo(PAD.l,zeroY);ctx.lineTo(PAD.l+gW,zeroY);ctx.stroke();
+    ctx.setLineDash([]);
   }
 
-  const sumScale   = sumLines.length   ? getScale(sumLines)   : null;
-  const assetScale = assetLines.length ? getScale(assetLines) : null;
-  const mainScale  = sumScale || assetScale;
-  if(!mainScale) return;
-
-  const toX=i=>PAD.l+(chartHistory.length>1?i/(chartHistory.length-1):0.5)*gW;
-  // 합계 → 왼쪽 Y축(mainScale), 개별 → 오른쪽 Y축(assetScale) or 같은 축
-  const toYsum  = v=>PAD.t+(1-(v-mainScale.minV)/mainScale.rng)*gH;
-  const toYasset= hasBoth && assetScale
-    ? v=>PAD.t+(1-(v-assetScale.minV)/assetScale.rng)*gH
-    : toYsum;
-
   // 그리드
-  ctx.strokeStyle='rgba(128,128,128,.1)';ctx.lineWidth=1;
+  ctx.strokeStyle='rgba(128,128,128,.08)';ctx.lineWidth=1;
   for(let r=0;r<=4;r++){
     const y=PAD.t+(r/4)*gH;
     ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
   }
 
-  // Y축 레이블 (합계 = 오른쪽, 개별 = 오른쪽 또는 왼쪽)
-  ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';
-  if(hasBoth && assetScale){
-    // 왼쪽: 합계, 오른쪽: 개별 종목
-    ctx.textAlign='left';
-    for(let r=0;r<=4;r++){
-      const y=PAD.t+(r/4)*gH;
-      ctx.fillStyle='#1c1c1e';
-      ctx.fillText(fmt(mainScale.maxV-(r/4)*mainScale.rng),PAD.l+gW+5,y+4);
-    }
-    // 개별 종목 Y축 레이블 (오른쪽 끝)
-    for(let r=0;r<=4;r++){
-      const y=PAD.t+(r/4)*gH;
-      ctx.fillStyle='#8e8e93';
-      ctx.fillText(fmt(assetScale.maxV-(r/4)*assetScale.rng),PAD.l+gW+5,y+14);
-    }
-  } else {
-    ctx.textAlign='left';
-    for(let r=0;r<=4;r++){
-      const y=PAD.t+(r/4)*gH;
-      ctx.fillStyle='#8e8e93';
-      ctx.fillText(fmt(mainScale.maxV-(r/4)*mainScale.rng),PAD.l+gW+5,y+4);
-    }
+  // Y축 레이블 (왼쪽)
+  ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='right';
+  for(let r=0;r<=4;r++){
+    const y=PAD.t+(r/4)*gH;
+    const val=maxV-(r/4)*rng;
+    ctx.fillText((val>=0?'+':'')+val.toFixed(1)+'%',PAD.l-5,y+4);
   }
-  // X축
+
+  // X축 (xT=1 방어)
   ctx.font='10px Pretendard,-apple-system,sans-serif';
-  const xT=Math.min(6,chartHistory.length);
+  const xT=Math.max(2,Math.min(6,chartHistory.length));
   for(let i=0;i<xT;i++){
-    const idx=Math.round(i/(xT-1)*(chartHistory.length-1));
-    const ts=chartHistory[idx].ts;
+    const idx=xT>1?Math.round(i/(xT-1)*(chartHistory.length-1)):0;
+    const ts=chartHistory[Math.min(idx,chartHistory.length-1)].ts;
     const d=new Date(ts);
     const mo=d.getMonth()+1,dd=d.getDate();
     const hh=String(d.getHours()).padStart(2,'0'),mm=String(d.getMinutes()).padStart(2,'0');
     const x=toX(idx);
-    const y1=H-PAD.b+13,y2=H-PAD.b+25;
-    ctx.textAlign=i===0?'left':'right';
+    ctx.textAlign=i===0?'left':(i===xT-1?'right':'center');
+    ctx.fillStyle='#8e8e93';
     if(['1D','1W','1M'].includes(currentPeriod)){
-      ctx.fillStyle='#8e8e93';
-      ctx.fillText(`${mo}/${dd}`,x,y1);
-      ctx.fillText(`${hh}:${mm}`,x,y2);
+      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
+      ctx.fillText(hh+':'+mm,x,H-PAD.b+25);
     }else if(['3M','6M','YTD'].includes(currentPeriod)){
-      ctx.fillStyle='#8e8e93';ctx.fillText(`${mo}/${dd}`,x,y1);
+      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
     }else{
-      ctx.fillStyle='#8e8e93';ctx.fillText(`${String(d.getFullYear()).slice(2)}/${String(mo).padStart(2,'0')}`,x,y1);
+      ctx.fillText(String(d.getFullYear()).slice(2)+'/'+String(mo).padStart(2,'0'),x,H-PAD.b+13);
     }
   }
+
+  // 선 그리기 + ③ 끝 레이블 잘림 방지
   lines.forEach(line=>{
-    const toY = line.label==='합계' ? toYsum : toYasset;
     ctx.beginPath();
     ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
     let started=false;
     line.vals.forEach((v,i)=>{
       if(v==null) return;
-      if(!started){ ctx.moveTo(toX(i),toY(v)); started=true; }
-      else { ctx.lineTo(toX(i),toY(v)); }
+      if(!started){ctx.moveTo(toX(i),toY(v));started=true;}
+      else{ctx.lineTo(toX(i),toY(v));}
     });
     ctx.stroke();
     const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
     if(lastValidIdx===-1) return;
     const lastIdx=line.vals.length-1-lastValidIdx;
-    const lx=toX(lastIdx),ly=toY(line.vals[lastIdx]);
-    ctx.beginPath();ctx.arc(lx,ly,4,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
-    ctx.beginPath();ctx.arc(lx,ly,2.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+    const lastPct=line.vals[lastIdx];
+    const lx=toX(lastIdx),ly=toY(lastPct);
+    // 끝점 원
+    ctx.beginPath();ctx.arc(lx,ly,3.5,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
+    ctx.beginPath();ctx.arc(lx,ly,2,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+    // 끝 레이블: 오른쪽 PAD 안에 배치, 잘림 방지
+    const label=(lastPct>=0?'+':'')+lastPct.toFixed(1)+'%';
+    ctx.font='bold 10px Pretendard,-apple-system,sans-serif';
+    ctx.fillStyle=line.color;
+    ctx.textAlign='left';
+    const tx=Math.min(lx+6, W-PAD.r+2); // 오른쪽 경계 안으로
+    ctx.fillText(label,tx,ly+4);
   });
 }
 
 function renderStatBar(){
   const bar=document.getElementById('statBar');
-  const items=[...(showSum?[null]:[]),...[...selectedAssets].slice(0,showSum?3:4)];
+  const items=[
+    ...(showSum?[null]:[]),
+    ...[...selectedAssets].map(id=>assets.find(x=>x.id===id)).filter(Boolean)
+  ];
   if(!items.length){bar.innerHTML='';return;}
-  bar.innerHTML=items.slice(0,4).map(id=>{
-    const a=id?assets.find(x=>x.id===id):null;
+  bar.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:4px;">'+
+  items.map(a=>{
     const rawVals=chartHistory.map(h=>{
-      if(a) return h.byAsset[a.id]??null;
-      return Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0);
+      if(!a) return Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0);
+      return h.byAsset[a.id]??null;
     });
-    // null 제거 후 유효값만
     const vals=rawVals.filter(v=>v!=null&&v>0);
     if(!vals.length) return'';
     const first=vals[0],last=vals[vals.length-1];
     const hi=Math.max(...vals),lo=Math.min(...vals);
     const diff=last-first,pct=first>0?(diff/first)*100:0;
-    return`<div class="stat-item">
-      <div class="stat-lbl">${a?a.name:'합계'}</div>
-      <div class="stat-val ${updn(diff)}">${diff>=0?'+':''}${fmt(diff)} (${fmtPct(pct)})</div>
-      <div class="stat-sub">고: ${fmt(hi)} · 저: ${fmt(lo)}</div>
-    </div>`;
-  }).join('');
+    const color=a?LINE_COLS[assets.indexOf(a)%LINE_COLS.length]:'#1c1c1e';
+    return'<div class="stat-item">'+
+      '<div class="stat-lbl" style="color:'+color+';font-weight:700;">'+(a?a.name:'합계')+'</div>'+
+      '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
+      '<div class="stat-sub">고: '+fmt(hi)+' · 저: '+fmt(lo)+'</div>'+
+    '</div>';
+  }).join('')+'</div>';
 }
 
+
 function renderToggles(){
-  const allSelected=assets.every(a=>selectedAssets.has(a.id));
+  // 전체 선택 = 모든 종목 + 합계 모두 켜진 상태
+  const allSelected = assets.every(a=>selectedAssets.has(a.id)) && showSum;
   document.getElementById('assetToggles').innerHTML=
     `<button class="toggle-ctrl" onclick="toggleAll()" style="background:${allSelected?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected?'#fff':'var(--color-text)'}">
       ${allSelected?'전체 해제':'전체 선택'}</button>
@@ -1940,8 +1901,16 @@ function toggleSum(){
   renderToggles();drawLineChart();renderStatBar();
 }
 function toggleAll(){
-  const all=assets.every(a=>selectedAssets.has(a.id));
-  all?selectedAssets.clear():assets.forEach(a=>selectedAssets.add(a.id));
+  const allSelected = assets.every(a=>selectedAssets.has(a.id)) && showSum;
+  if(allSelected){
+    // 전체 해제: 종목 + 합계 모두 끄기
+    selectedAssets.clear();
+    showSum=false;
+  } else {
+    // 전체 선택: 종목 + 합계 모두 켜기
+    assets.forEach(a=>selectedAssets.add(a.id));
+    showSum=true;
+  }
   saveChartSel();
   renderToggles();drawLineChart();renderStatBar();
 }
