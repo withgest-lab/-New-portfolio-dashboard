@@ -1750,12 +1750,203 @@ async function buildChartHistory(){
 function drawLineChart(){
   const cv=document.getElementById('lineChart');
   const dpr=window.devicePixelRatio||1;
-  const W=cv.parentElement.clientWidth||900,H=280;
+  const W=cv.parentElement.clientWidth||900, H=340; // ③ 높이 확대
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
   cv.style.width=W+'px';cv.style.height=H+'px';
   const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
-  const PAD={t:20,r:60,b:52,l:46};
-  const gW=W-PAD.l-PAD.r,gH=H-PAD.t-PAD.b;
+  const PAD={t:36,r:62,b:52,l:48}; // ④ 상단 패딩 확대
+  const gW=W-PAD.l-PAD.r, gH=H-PAD.t-PAD.b;
+  if(!chartHistory.length) return;
+
+  // % 변화율
+  const lines=[];
+  if(showSum){
+    const rawVals=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
+    const firstVal=rawVals.find(v=>v>0)||1;
+    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:1.2,isSum:true});
+  }
+  assets.forEach((a,i)=>{
+    if(!selectedAssets.has(a.id)) return;
+    const rawVals=chartHistory.map(h=>h.byAsset[a.id]??null);
+    const firstIdx=rawVals.findIndex(v=>v!=null&&v>0);
+    if(firstIdx===-1) return;
+    const firstVal=rawVals[firstIdx];
+    const pctVals=rawVals.map((v,idx)=>idx<firstIdx?null:(v!=null?((v-firstVal)/firstVal)*100:null));
+    const events=[];
+    for(let j=1;j<pctVals.length;j++){
+      const prev=pctVals[j-1],curr=pctVals[j];
+      if(prev==null||curr==null) continue;
+      const jump=curr-prev;
+      if(Math.abs(jump)>=4) events.push({idx:j,type:jump>0?'buy':'sell',jump});
+    }
+    const lineColor=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
+    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:lineColor,lw:1.0,assetId:a.id,events});
+  });
+  if(!lines.length) return;
+
+  const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
+  if(!allPct.length) return;
+  const minP=Math.min(...allPct), maxP=Math.max(...allPct);
+
+  // IQR 이상치 감지
+  const sortedPct=[...allPct].sort((a,b)=>a-b);
+  const q1=sortedPct[Math.floor(sortedPct.length*0.25)];
+  const q3=sortedPct[Math.floor(sortedPct.length*0.75)];
+  const iqr=q3-q1||1;
+  const lowerFence=q1-iqr*2.5, upperFence=q3+iqr*2.5;
+  const normalPct=allPct.filter(v=>v>=lowerFence&&v<=upperFence);
+  const minN=normalPct.length?Math.min(...normalPct):minP;
+  const maxN=normalPct.length?Math.max(...normalPct):maxP;
+  const pad=(maxN-minN)*0.2||1.5;
+  const minV=minN-pad, maxV=maxN+pad, rng=maxV-minV||1;
+  const hasOutlier=minP<lowerFence||maxP>upperFence;
+
+  const toX=i=>chartHistory.length>1?PAD.l+(i/(chartHistory.length-1))*gW:PAD.l+gW*0.5;
+  // ① 클리핑 없이 — 이상치는 경계에 고정하되 화살표는 실제 위치로
+  const toY=v=>{
+    const clamped=Math.max(minV,Math.min(maxV,v));
+    return PAD.t+(1-(clamped-minV)/rng)*gH;
+  };
+  const toYraw=v=>PAD.t+(1-(v-minV)/rng)*gH; // 클리핑 없는 실제 Y
+
+  // 0% 기준선
+  if(minV<=0&&maxV>=0){
+    ctx.strokeStyle='rgba(128,128,128,.25)';ctx.lineWidth=1;ctx.setLineDash([3,2]);
+    ctx.beginPath();ctx.moveTo(PAD.l,toY(0));ctx.lineTo(PAD.l+gW,toY(0));ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 그리드
+  ctx.strokeStyle='rgba(128,128,128,.07)';ctx.lineWidth=1;
+  for(let r=0;r<=4;r++){
+    const y=PAD.t+(r/4)*gH;
+    ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
+  }
+
+  // 이상치 물결선 (상단 아주 얇게)
+  if(hasOutlier){
+    const bY=PAD.t-10;
+    ctx.strokeStyle='rgba(150,150,150,.3)';ctx.lineWidth=1;
+    for(let x=PAD.l;x<PAD.l+gW;x+=6){
+      ctx.beginPath();ctx.moveTo(x,bY);ctx.lineTo(x+3,bY-2);ctx.lineTo(x+6,bY);ctx.stroke();
+    }
+    ctx.fillStyle='rgba(142,142,147,.6)';ctx.font='9px Pretendard,-apple-system,sans-serif';
+    ctx.textAlign='left';ctx.fillText('≈ 이상치 클리핑',PAD.l+2,bY+10);
+  }
+
+  // Y축 레이블
+  ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='right';
+  for(let r=0;r<=4;r++){
+    const y=PAD.t+(r/4)*gH;
+    const val=maxV-(r/4)*rng;
+    ctx.fillText((val>=0?'+':'')+val.toFixed(1)+'%',PAD.l-5,y+4);
+  }
+
+  // X축
+  ctx.font='10px Pretendard,-apple-system,sans-serif';
+  const xT=Math.max(2,Math.min(6,chartHistory.length));
+  for(let i=0;i<xT;i++){
+    const idx=xT>1?Math.round(i/(xT-1)*(chartHistory.length-1)):0;
+    const ts=chartHistory[Math.min(idx,chartHistory.length-1)].ts;
+    const d=new Date(ts);
+    const mo=d.getMonth()+1,dd=d.getDate();
+    const hh=String(d.getHours()).padStart(2,'0'),mm=String(d.getMinutes()).padStart(2,'0');
+    const x=toX(idx);
+    ctx.textAlign=i===0?'left':(i===xT-1?'right':'center');
+    ctx.fillStyle='#8e8e93';
+    if(['1D','1W','1M'].includes(currentPeriod)){
+      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
+      ctx.fillText(hh+':'+mm,x,H-PAD.b+25);
+    }else if(['3M','6M','YTD'].includes(currentPeriod)){
+      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
+    }else{
+      ctx.fillText(String(d.getFullYear()).slice(2)+'/'+String(mo).padStart(2,'0'),x,H-PAD.b+13);
+    }
+  }
+
+  // ── 선 그리기 ──
+  lines.forEach(line=>{
+    ctx.setLineDash([]); // ⑤ 초기화 보장
+    ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.setLineDash(line.isSum?[5,2]:[3,2]);
+    ctx.beginPath();
+    let started=false;
+    line.vals.forEach((v,i)=>{
+      if(v==null) return;
+      const cy=toY(v);
+      if(!started){ctx.moveTo(toX(i),cy);started=true;}
+      else{ctx.lineTo(toX(i),cy);}
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── 매수/매도 화살표 ──
+    if(line.events){
+      line.events.forEach(ev=>{
+        const v=line.vals[ev.idx];
+        if(v==null) return;
+        const ex=toX(ev.idx);
+        // ① 화살표 위치: 클리핑된 선 위치 기준 (경계 안)
+        const lineY=toY(v);
+        const isBuy=ev.type==='buy';
+        const arrowY=isBuy
+          ? Math.max(PAD.t+14, lineY-14) // 상단 경계 안
+          : Math.min(PAD.t+gH-14, lineY+14); // 하단 경계 안
+        ctx.fillStyle=line.color;
+        ctx.beginPath();
+        if(isBuy){
+          ctx.moveTo(ex,arrowY-8);
+          ctx.lineTo(ex-5,arrowY);
+          ctx.lineTo(ex+5,arrowY);
+        } else {
+          ctx.moveTo(ex,arrowY+8);
+          ctx.lineTo(ex-5,arrowY);
+          ctx.lineTo(ex+5,arrowY);
+        }
+        ctx.closePath();ctx.fill();
+        // 점프 크기 레이블 (항상 표시)
+        ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
+        ctx.fillStyle=line.color;ctx.textAlign='center';
+        const lbY=isBuy?arrowY-11:arrowY+19;
+        ctx.fillText((ev.jump>=0?'+':'')+ev.jump.toFixed(1)+'%',ex,Math.max(PAD.t+8,Math.min(PAD.t+gH-4,lbY)));
+      });
+    }
+
+    // 끝점 원
+    const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
+    if(lastValidIdx===-1) return;
+    const lastIdx=line.vals.length-1-lastValidIdx;
+    const lastPct=line.vals[lastIdx];
+    const lx=toX(lastIdx), ly=toY(lastPct);
+    ctx.beginPath();ctx.arc(lx,ly,3,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
+    ctx.beginPath();ctx.arc(lx,ly,1.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+    line._lx=lx;line._ly=ly;line._lastPct=lastPct;
+  });
+
+  // ── 끝 레이블 겹침 방지 ──
+  const labeled=lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
+  const LABEL_H=13;
+  // ② 첫 항목 초기화를 루프 전에
+  if(labeled.length>0) labeled[0]._adjLy=labeled[0]._ly;
+  for(let i=1;i<labeled.length;i++){
+    labeled[i]._adjLy=(labeled[i]._ly-labeled[i-1]._adjLy<LABEL_H)
+      ? labeled[i-1]._adjLy+LABEL_H
+      : labeled[i]._ly;
+  }
+  labeled.forEach(line=>{
+    if(line._ly==null) return;
+    const adjLy=Math.min(PAD.t+gH-2, line._adjLy??line._ly); // 하단 경계 안
+    const label=(line._lastPct>=0?'+':'')+line._lastPct.toFixed(1)+'%';
+    ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
+    ctx.fillStyle=line.color;ctx.textAlign='left';
+    if(Math.abs(adjLy-line._ly)>3){
+      ctx.strokeStyle=line.color;ctx.lineWidth=0.5;ctx.setLineDash([2,2]);
+      ctx.beginPath();ctx.moveTo(line._lx+4,line._ly);ctx.lineTo(line._lx+6,adjLy);ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillText(label,Math.min(line._lx+7,W-4),adjLy+3);
+  });
+}
   if(!chartHistory.length) return;
 
   // % 변화율
@@ -1926,33 +2117,6 @@ function drawLineChart(){
     // 레이블은 나중에 겹침 보정 후 그림
     line._lx=lx;line._ly=ly;line._lastPct=lastPct;
   });
-
-  // ── 끝 레이블 겹침 방지: Y 위치 정렬 ──
-  const labeled=lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
-  const LABEL_H=13; // 레이블 최소 간격
-  for(let i=1;i<labeled.length;i++){
-    if(labeled[i]._ly-labeled[i-1]._adjLy<LABEL_H){
-      labeled[i]._adjLy=labeled[i-1]._adjLy+LABEL_H;
-    } else {
-      labeled[i]._adjLy=labeled[i]._ly;
-    }
-    labeled[0]._adjLy=labeled[0]._ly;
-  }
-  labeled.forEach(line=>{
-    if(line._ly==null) return;
-    const adjLy=line._adjLy??line._ly;
-    const label=(line._lastPct>=0?'+':'')+line._lastPct.toFixed(1)+'%';
-    ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
-    ctx.fillStyle=line.color;ctx.textAlign='left';
-    // 연결선 (끝점→레이블)
-    if(Math.abs(adjLy-line._ly)>3){
-      ctx.strokeStyle=line.color;ctx.lineWidth=0.5;ctx.setLineDash([2,2]);
-      ctx.beginPath();ctx.moveTo(line._lx+4,line._ly);ctx.lineTo(line._lx+6,adjLy);ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    ctx.fillText(label,Math.min(line._lx+7,W-PAD.r+2),adjLy+3);
-  });
-}
 
 function renderStatBar(){
   const bar=document.getElementById('statBar');
