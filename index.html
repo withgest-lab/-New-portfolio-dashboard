@@ -2418,11 +2418,21 @@ function confirmSaveSheets(){
 ════════════════════════════════════════ */
 // 자동 스냅샷 시간 (한국 시간 기준)
 // 22:30, 23:30, 03:00, 05:00, 06:00, 09:00, 10:00, 12:00, 15:00, 15:30
+// 자동 스냅샷 시간 (한국 시간 기준)
+// 평일(월~금): 미국장 + 한국장 전체
+// 토요일: 미국장 마감 전후만 (03:00, 05:00, 06:00)
+// 일요일: 없음
 const AUTO_SNAP_TIMES = [
-  {h:22,m:30}, {h:23,m:30},
-  {h: 3,m: 0}, {h: 5,m: 0}, {h: 6,m: 0},
-  {h: 9,m: 0}, {h:10,m: 0}, {h:12,m: 0},
-  {h:15,m: 0}, {h:15,m:30},
+  {h:22,m:30, days:[1,2,3,4,5]},   // 미국장 시작 직전 (월~금)
+  {h:23,m:30, days:[1,2,3,4,5]},   // 미국장 시작 후 1시간 (월~금)
+  {h: 3,m: 0, days:[1,2,3,4,5,6]}, // 미국장 중간 (월~토)
+  {h: 5,m: 0, days:[1,2,3,4,5,6]}, // 미국장 마감 전 (월~토)
+  {h: 6,m: 0, days:[1,2,3,4,5,6]}, // 미국장 마감 직후 (월~토)
+  {h: 9,m: 0, days:[1,2,3,4,5]},   // 한국장 시작 (월~금)
+  {h:10,m: 0, days:[1,2,3,4,5]},   // 한국장 오전 (월~금)
+  {h:12,m: 0, days:[1,2,3,4,5]},   // 한국장 점심 (월~금)
+  {h:15,m: 0, days:[1,2,3,4,5]},   // 한국장 마감 전 (월~금)
+  {h:15,m:30, days:[1,2,3,4,5]},   // 한국장 마감 (월~금)
 ];
 // 매시 정각 자동 저장 (하루 24회)
 // snapFiredDate를 localStorage에 저장 → 페이지 새로고침 후에도 중복 저장 방지
@@ -2441,19 +2451,42 @@ function markSnapFired(h, m) {
   keys.forEach(k => { if(!k.includes(today)) localStorage.removeItem(k); });
 }
 
-setInterval(async()=>{
+// ★ 페이지 로드 시 오늘 누락된 자동 스냅샷 보완
+// (새벽에 페이지가 닫혀있어서 못 찍은 경우)
+async function catchUpSnaps(){
   const now = new Date();
-  const day = now.getDay(); // 0=일, 6=토
-
-  // ★ 주말(토/일)은 자동 스냅샷 동작하지 않음
-  if(day===0 || day===6) return;
+  const day = now.getDay();
+  if(day===0) return; // 일요일만 제외 (토요일은 미국장 스냅샷 있음)
 
   const h = now.getHours();
   const m = now.getMinutes();
+  const nowMin = h*60+m;
+
+  // 오늘 이미 지난 시간 중 fired 안 된 항목
+  const missed = AUTO_SNAP_TIMES.filter(t=>{
+    const tMin = t.h*60+t.m;
+    return t.days.includes(day) && tMin < nowMin-2 && !wasSnapFired(t.h,t.m);
+  });
+
+  if(missed.length > 0){
+    console.log(`누락 스냅샷 ${missed.length}개 보완 → 현재 시세로 1회 저장`);
+    missed.forEach(t => markSnapFired(t.h,t.m));
+    try{ await fetchAllPrices(true); }
+    catch(e){ try{ saveSnap(); }catch(e2){} }
+  }
+}
+
+setInterval(async()=>{
+  const now = new Date();
+  const day = now.getDay(); // 0=일, 1=월, ..., 6=토
+  const h = now.getHours();
+  const m = now.getMinutes();
+
   for(const t of AUTO_SNAP_TIMES){
+    // 해당 항목의 허용 요일인지 확인
+    if(!t.days.includes(day)) continue;
     const diffMin = (h*60+m) - (t.h*60+t.m);
     if(Math.abs(diffMin)<=1 && !wasSnapFired(t.h,t.m)){
-      // ★ markSnapFired를 먼저 호출해 중복 방지 (fetchAllPrices 실패해도 재시도 안 함)
       markSnapFired(t.h,t.m);
       try{
         await fetchAllPrices(true);
@@ -2486,6 +2519,8 @@ window.addEventListener('resize',()=>drawLineChart());
 (async function init(){
   renderAll();renderSnaps();renderIndices();
   fetchIndices();
+  // ★ 누락 스냅샷 보완 (페이지 닫혀있던 동안 못 찍은 스냅샷)
+  setTimeout(catchUpSnaps, 3000);
 
   // Google Sheets 설정 있으면 최신 데이터 자동 불러오기
   const gsCfg = loadGSyncConfig();
