@@ -1742,16 +1742,16 @@ function drawLineChart(){
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
   cv.style.width=W+'px';cv.style.height=H+'px';
   const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
-  const PAD={t:20,r:60,b:52,l:46}; // r을 60으로 늘려 끝 레이블 여유
+  const PAD={t:20,r:60,b:52,l:46};
   const gW=W-PAD.l-PAD.r,gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
 
-  // % 변화율: 각 선의 첫 유효값 대비
+  // % 변화율
   const lines=[];
   if(showSum){
     const rawVals=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
     const firstVal=rawVals.find(v=>v>0)||1;
-    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:2.5});
+    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:1.5,isSum:true});
   }
   assets.forEach((a,i)=>{
     if(!selectedAssets.has(a.id)) return;
@@ -1760,23 +1760,20 @@ function drawLineChart(){
     if(firstIdx===-1) return;
     const firstVal=rawVals[firstIdx];
     const pctVals=rawVals.map((v,idx)=>idx<firstIdx?null:(v!=null?((v-firstVal)/firstVal)*100:null));
-    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:LINE_COLS[i%LINE_COLS.length],lw:1.8});
+    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:LINE_COLS[i%LINE_COLS.length],lw:1.5,assetId:a.id});
   });
   if(!lines.length) return;
 
   const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
   if(!allPct.length) return;
   const minP=Math.min(...allPct),maxP=Math.max(...allPct);
-  const pad=(maxP-minP)*0.15||1.0; // 패딩 넉넉히
+  const pad=(maxP-minP)*0.15||1.0;
   const minV=minP-pad,maxV=maxP+pad,rng=maxV-minV||1;
 
-  // ① xT=1 방어
-  const toX=i=>chartHistory.length>1
-    ? PAD.l+(i/(chartHistory.length-1))*gW
-    : PAD.l+gW*0.5;
+  const toX=i=>chartHistory.length>1?PAD.l+(i/(chartHistory.length-1))*gW:PAD.l+gW*0.5;
   const toY=v=>PAD.t+(1-(v-minV)/rng)*gH;
 
-  // ② 0% 기준선 (범위 안에 있을 때만)
+  // 0% 기준선
   if(minV<=0&&maxV>=0){
     const zeroY=toY(0);
     ctx.strokeStyle='rgba(128,128,128,.3)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
@@ -1791,7 +1788,7 @@ function drawLineChart(){
     ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
   }
 
-  // Y축 레이블 (왼쪽)
+  // Y축 레이블
   ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='right';
   for(let r=0;r<=4;r++){
     const y=PAD.t+(r/4)*gH;
@@ -1799,7 +1796,7 @@ function drawLineChart(){
     ctx.fillText((val>=0?'+':'')+val.toFixed(1)+'%',PAD.l-5,y+4);
   }
 
-  // X축 (xT=1 방어)
+  // X축
   ctx.font='10px Pretendard,-apple-system,sans-serif';
   const xT=Math.max(2,Math.min(6,chartHistory.length));
   for(let i=0;i<xT;i++){
@@ -1821,10 +1818,37 @@ function drawLineChart(){
     }
   }
 
-  // 선 그리기 + ③ 끝 레이블 잘림 방지
+  // ── 매수 이벤트 수직 점선 ──
+  // 스냅샷 간 수량 증가 감지 → 매수 시점으로 판단
+  const buyEvents=new Set();
+  for(let i=1;i<chartHistory.length;i++){
+    const prev=chartHistory[i-1].byAsset;
+    const curr=chartHistory[i].byAsset;
+    let isBuy=false;
+    assets.forEach(a=>{
+      const prevVal=prev[a.id]||0;
+      const currVal=curr[a.id]||0;
+      // 현재가가 크게 올랐고(5% 이상) 이전에도 있었던 종목 → 매수 가능성
+      if(prevVal>0&&currVal>0&&(currVal/prevVal)>1.05) isBuy=true;
+    });
+    if(isBuy) buyEvents.add(i);
+  }
+  buyEvents.forEach(i=>{
+    const x=toX(i);
+    ctx.strokeStyle='rgba(100,100,100,.25)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(x,PAD.t);ctx.lineTo(x,PAD.t+gH);ctx.stroke();
+    ctx.setLineDash([]);
+    // ▲ 아이콘
+    ctx.fillStyle='rgba(100,100,100,.45)';ctx.font='9px sans-serif';ctx.textAlign='center';
+    ctx.fillText('▲',x,PAD.t+gH+10);
+  });
+
+  // ── 선 그리기 (점선) ──
   lines.forEach(line=>{
-    ctx.beginPath();
     ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
+    // 합계는 굵은 점선, 개별 종목은 가는 점선
+    ctx.setLineDash(line.isSum?[6,3]:[4,3]);
+    ctx.beginPath();
     let started=false;
     line.vals.forEach((v,i)=>{
       if(v==null) return;
@@ -1832,21 +1856,20 @@ function drawLineChart(){
       else{ctx.lineTo(toX(i),toY(v));}
     });
     ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 끝점 원 + 레이블
     const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
     if(lastValidIdx===-1) return;
     const lastIdx=line.vals.length-1-lastValidIdx;
     const lastPct=line.vals[lastIdx];
     const lx=toX(lastIdx),ly=toY(lastPct);
-    // 끝점 원
     ctx.beginPath();ctx.arc(lx,ly,3.5,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
     ctx.beginPath();ctx.arc(lx,ly,2,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
-    // 끝 레이블: 오른쪽 PAD 안에 배치, 잘림 방지
     const label=(lastPct>=0?'+':'')+lastPct.toFixed(1)+'%';
     ctx.font='bold 10px Pretendard,-apple-system,sans-serif';
-    ctx.fillStyle=line.color;
-    ctx.textAlign='left';
-    const tx=Math.min(lx+6, W-PAD.r+2); // 오른쪽 경계 안으로
-    ctx.fillText(label,tx,ly+4);
+    ctx.fillStyle=line.color;ctx.textAlign='left';
+    ctx.fillText(label,Math.min(lx+6,W-PAD.r+2),ly+4);
   });
 }
 
@@ -1870,7 +1893,7 @@ function renderStatBar(){
     const diff=last-first,pct=first>0?(diff/first)*100:0;
     const color=a?LINE_COLS[assets.indexOf(a)%LINE_COLS.length]:'#1c1c1e';
     return'<div class="stat-item">'+
-      '<div class="stat-lbl" style="color:'+color+';font-weight:700;">'+(a?a.name:'합계')+'</div>'+
+      '<div class="stat-lbl" style="color:#636366;font-weight:600;">'+(a?a.name:'합계')+'</div>'+
       '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
       '<div class="stat-sub">고: '+fmt(hi)+' · 저: '+fmt(lo)+'</div>'+
     '</div>';
