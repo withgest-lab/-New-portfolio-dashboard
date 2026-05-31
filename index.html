@@ -1075,13 +1075,15 @@ function closeTradeConfirm(){
 
 function executeTrade(){
   if(!pendingTrade) return;
-  const {id, mode, qty, price} = pendingTrade;
-  closeTradeConfirm();
+  // ★ closeTradeConfirm이 pendingTrade를 null로 만들기 전에 먼저 저장
+  const trade = pendingTrade;
+  const {id, mode, qty, price} = trade;
+  closeTradeConfirm(); // 여기서 pendingTrade = null 됨
   const st = document.getElementById('formStatus');
 
   // 스냅샷 개별 삭제
   if(mode==='snap_delete'){
-    const {snapKey} = pendingTrade;
+    const {snapKey} = trade; // ★ pendingTrade 아닌 trade에서 꺼냄
     const before=loadSnaps();
     const after=before.filter(s=>String(s.id||s.timestamp)!==String(snapKey));
     saveSnaps(after);
@@ -1117,22 +1119,20 @@ function executeTrade(){
 
   // 매수 폼
   if(mode==='form_buy'){
-    const {name, ticker, cat, qty:fQty, price:fPrice, cur} = pendingTrade;
+    const {name, ticker, cat, qty:fQty, price:fPrice, cur} = trade;
     const tickerVal = ticker||'—';
-    // 티커가 있으면 티커로, 없으면 이름+통화로 중복 검사
     const existing = tickerVal!=='—'
       ? assets.find(a=>a.ticker.toUpperCase()===tickerVal)
       : assets.find(a=>a.name===name && a.currency===cur && a.category===cat);
     if(existing){
       const prevQty  = existing.quantity;
       const totalQty = prevQty + fQty;
-      // 반드시 avgPrice 먼저 계산 후 quantity 업데이트
       existing.avgPrice = Math.round(((existing.avgPrice*prevQty)+(fPrice*fQty))/totalQty*100)/100;
       existing.quantity = totalQty;
-      if(st){ st.textContent=`✅ ${existing.name} ${fQty.toLocaleString()}주 매수 → 총 ${totalQty.toLocaleString()}주 · 평균 ${CUR_SYM[cur]}${existing.avgPrice.toLocaleString()}`; setTimeout(()=>{st.textContent='';},4000); }
+      if(st){ st.textContent=`✅ ${existing.name} ${fQty.toLocaleString()}주 매수 → 총 ${totalQty.toLocaleString()}주`; setTimeout(()=>{st.textContent='';},3000); }
     } else {
       assets.push({id:uid(),ticker:tickerVal,name,category:cat,quantity:fQty,avgPrice:fPrice,currentPrice:fPrice,prevPrice:fPrice,currency:cur});
-      if(st){ st.textContent=`✅ ${name} 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`; setTimeout(()=>{st.textContent='';},4000); }
+      if(st){ st.textContent=`✅ ${name} 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`; setTimeout(()=>{st.textContent='';},3000); }
     }
     resetBuyForm();
     saveAssets();renderAll();syncToSheets(true);
@@ -1141,16 +1141,16 @@ function executeTrade(){
 
   // 매도 폼
   if(mode==='form_sell'){
-    const {assetId, sellQty, sellPrice} = pendingTrade;
+    const {assetId, sellQty, sellPrice} = trade;
     const a = assets.find(x=>x.id===assetId); if(!a) return;
     const pnl = Math.round((sellPrice - a.avgPrice) * sellQty);
     const sym = CUR_SYM[a.currency];
     if(sellQty===a.quantity){
       assets = assets.filter(x=>x.id!==assetId);
-      if(st){ st.innerHTML=`✅ ${a.name} 전량 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.textContent='';},4000); }
+      if(st){ st.innerHTML=`✅ ${a.name} 전량 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.innerHTML='';},3000); }
     } else {
       a.quantity -= sellQty;
-      if(st){ st.innerHTML=`✅ ${a.name} ${sellQty.toLocaleString()}주 매도 · 잔여 ${a.quantity.toLocaleString()}주 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.textContent='';},4000); }
+      if(st){ st.innerHTML=`✅ ${a.name} ${sellQty.toLocaleString()}주 매도 · 잔여 ${a.quantity.toLocaleString()}주 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.innerHTML='';},3000); }
     }
     resetSellForm();
     saveAssets();renderAll();syncToSheets(true);
@@ -1159,14 +1159,14 @@ function executeTrade(){
 
   // 현금 폼
   if(mode==='form_cash'){
-    const {name:cName, amount, cur} = pendingTrade;
+    const {name:cName, amount, cur} = trade;
     const existing = assets.find(a=>a.category==='cash'&&a.name===cName&&a.currency===cur);
     if(existing){
       existing.avgPrice=amount; existing.currentPrice=amount; existing.prevPrice=amount; existing.quantity=1;
-      if(st){ st.textContent=`✅ ${cName} ${CUR_SYM[cur]}${amount.toLocaleString()} 으로 업데이트`; setTimeout(()=>{st.textContent='';},4000); }
+      if(st){ st.textContent=`✅ ${cName} ${CUR_SYM[cur]}${amount.toLocaleString()} 으로 업데이트`; setTimeout(()=>{st.textContent='';},3000); }
     } else {
       assets.push({id:uid(),ticker:'—',name:cName,category:'cash',quantity:1,avgPrice:amount,currentPrice:amount,prevPrice:amount,currency:cur});
-      if(st){ st.textContent=`✅ ${cName} ${CUR_SYM[cur]}${amount.toLocaleString()} 추가 완료`; setTimeout(()=>{st.textContent='';},4000); }
+      if(st){ st.textContent=`✅ ${cName} ${CUR_SYM[cur]}${amount.toLocaleString()} 추가 완료`; setTimeout(()=>{st.textContent='';},3000); }
     }
     document.getElementById('cf_name').value='';
     document.getElementById('cf_amount').value='';
@@ -1175,7 +1175,7 @@ function executeTrade(){
     return;
   }
 
-  // 빠른 매수/매도 (행 클릭 패널)
+  // 빠른 매수/매도
   const a = assets.find(x=>x.id===id);
   if(!a) return;
   if(mode==='buy'){
@@ -1190,6 +1190,7 @@ function executeTrade(){
   setTimeout(()=>{ quickTradeId=null; editingId=null; renderTable(); }, 1500);
 }
 
+  // 매수 폼
 function closeTradePanel(){
   quickTradeId=null; editingId=null; renderTable();
 }
@@ -2094,58 +2095,106 @@ function drawLineChart(){
       const v=line.vals[ev.idx]; if(v==null) return;
       const ex=toX(ev.idx), ly=useY(v);
       const isBuy=ev.type==='buy';
-      const TAIL=14, HW=6, HH=8;
+      const TAIL=20; // 꼬리 길이
+      const HW=6;    // 화살촉 너비
+      const HH=7;    // 화살촉 높이
 
       ctx.strokeStyle=line.color; ctx.fillStyle=line.color;
       ctx.lineWidth=1.5; ctx.setLineDash([]);
 
       if(isBuy){
-        // 매수: 머리(꼭짓점)가 종목선 바로 아래, 꼬리는 위로
-        const headTip=ly+3;
-        ctx.beginPath(); ctx.moveTo(ex,headTip-HH); ctx.lineTo(ex,headTip-HH-TAIL+HH); ctx.stroke();
+        // 손그림처럼:
+        // ▲ 꼭짓점이 종목선(ly)에 바짝 붙음
+        // 꼬리는 꼭짓점 아래로 TAIL만큼 내려감
+        const tip  = ly;              // 꼭짓점 = 종목선
+        const base = tip + HH;        // 화살촉 밑변
+        const tail = base + TAIL;     // 꼬리 끝
+
+        // 화살촉 ▲ (꼭짓점 위)
         ctx.beginPath();
-        ctx.moveTo(ex,headTip); ctx.lineTo(ex-HW,headTip-HH); ctx.lineTo(ex+HW,headTip-HH);
+        ctx.moveTo(ex,      tip);
+        ctx.lineTo(ex-HW,   base);
+        ctx.lineTo(ex+HW,   base);
         ctx.closePath(); ctx.fill();
+
+        // 꼬리 세로선 (밑변 → 아래)
+        ctx.beginPath();
+        ctx.moveTo(ex, base);
+        ctx.lineTo(ex, tail);
+        ctx.stroke();
+
+        // 정보 박스: 꼬리 오른쪽, 꼬리 중간 높이에 위치
+        const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
+        const typeStr='매입';
+        const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
+        const aStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
+        const line1=typeStr+(qStr?' '+qStr:'');
+        const line2=aStr;
+
+        ctx.font='bold 8px Pretendard,sans-serif';
+        const tw1=ctx.measureText(line1).width;
+        ctx.font='8px Pretendard,sans-serif';
+        const tw2=ctx.measureText(line2).width;
+        const bw=Math.max(tw1,tw2)+14, bh=line2?28:16;
+
+        // 박스 X: 꼬리 바로 오른쪽
+        // 박스 Y: 꼬리 중간 높이 (base + TAIL/2 - bh/2)
+        const prefX=ex+6;
+        const prefY=base + TAIL/2 - bh/2;
+        const pos=placeBox(prefX,prefY,bw,bh,BL+4,BL+BW-4,BT+2,BT+BH-2);
+
+        ctx.fillStyle='rgba(255,255,255,0.96)';
+        ctx.strokeStyle=line.color+'99'; ctx.lineWidth=0.8;
+        ctx.beginPath(); ctx.roundRect(pos.x,pos.y,bw,bh,3); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=line.color; ctx.font='bold 8px Pretendard,sans-serif'; ctx.textAlign='left';
+        ctx.fillText(line1,pos.x+6,pos.y+11);
+        if(line2){
+          ctx.fillStyle='#555'; ctx.font='8px Pretendard,sans-serif';
+          ctx.fillText(line2,pos.x+6,pos.y+22);
+        }
+
       } else {
-        // 매도: 머리(꼭짓점)가 종목선 바로 위, 꼬리는 아래로
-        const headTip=ly-3;
-        ctx.beginPath(); ctx.moveTo(ex,headTip+HH); ctx.lineTo(ex,headTip+HH+TAIL-HH); ctx.stroke();
+        // 매도: 꼭짓점(▼)이 종목선에 바짝, 꼬리는 위로
+        const tip  = ly;
+        const base = tip - HH;
+        const tail = base - TAIL;
+
         ctx.beginPath();
-        ctx.moveTo(ex,headTip); ctx.lineTo(ex-HW,headTip+HH); ctx.lineTo(ex+HW,headTip+HH);
+        ctx.moveTo(ex,      tip);
+        ctx.lineTo(ex-HW,   base);
+        ctx.lineTo(ex+HW,   base);
         ctx.closePath(); ctx.fill();
-      }
 
-      // 정보 박스
-      const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
-      const typeStr=isBuy?'매입':'매도';
-      const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
-      const aStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
-      const line1=typeStr+(qStr?' '+qStr:'');
-      const line2=aStr;
+        ctx.beginPath();
+        ctx.moveTo(ex, base);
+        ctx.lineTo(ex, tail);
+        ctx.stroke();
 
-      ctx.font='bold 8px Pretendard,sans-serif';
-      const tw1=ctx.measureText(line1).width;
-      ctx.font='8px Pretendard,sans-serif';
-      const tw2=ctx.measureText(line2).width;
-      const bw=Math.max(tw1,tw2)+14, bh=line2?28:16;
+        const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
+        const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
+        const aStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
+        const line1='매도'+(qStr?' '+qStr:'');
+        const line2=aStr;
 
-      // 기본 위치: 화살표 오른쪽
-      const prefX=ex+10;
-      const prefY=isBuy ? ly-TAIL-bh-4 : ly+TAIL+4;
+        ctx.font='bold 8px Pretendard,sans-serif';
+        const tw1=ctx.measureText(line1).width;
+        ctx.font='8px Pretendard,sans-serif';
+        const tw2=ctx.measureText(line2).width;
+        const bw=Math.max(tw1,tw2)+14, bh=line2?28:16;
 
-      // 충돌 감지로 위치 결정 (외곽 박스 안에 클램프)
-      const pos=placeBox(prefX,prefY,bw,bh,BL+4,BL+BW-4,BT+2,BT+BH-2);
+        const prefX=ex+6;
+        const prefY=base - TAIL/2 - bh/2;
+        const pos=placeBox(prefX,prefY,bw,bh,BL+4,BL+BW-4,BT+2,BT+BH-2);
 
-      // 박스
-      ctx.fillStyle='rgba(255,255,255,0.96)';
-      ctx.strokeStyle=line.color+'99'; ctx.lineWidth=0.8;
-      ctx.beginPath(); ctx.roundRect(pos.x,pos.y,bw,bh,3); ctx.fill(); ctx.stroke();
-      // 텍스트
-      ctx.fillStyle=line.color; ctx.font='bold 8px Pretendard,sans-serif'; ctx.textAlign='left';
-      ctx.fillText(line1,pos.x+6,pos.y+11);
-      if(line2){
-        ctx.fillStyle='#666'; ctx.font='8px Pretendard,sans-serif';
-        ctx.fillText(line2,pos.x+6,pos.y+22);
+        ctx.fillStyle='rgba(255,255,255,0.96)';
+        ctx.strokeStyle=line.color+'99'; ctx.lineWidth=0.8;
+        ctx.beginPath(); ctx.roundRect(pos.x,pos.y,bw,bh,3); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=line.color; ctx.font='bold 8px Pretendard,sans-serif'; ctx.textAlign='left';
+        ctx.fillText(line1,pos.x+6,pos.y+11);
+        if(line2){
+          ctx.fillStyle='#555'; ctx.font='8px Pretendard,sans-serif';
+          ctx.fillText(line2,pos.x+6,pos.y+22);
+        }
       }
     });
   });
