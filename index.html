@@ -2024,9 +2024,14 @@ function renderStatBar(){
   }).join('')+'</div>';
 }
 
-function renderToggles(){
   // 전체 선택 = 모든 종목 + 합계 모두 켜진 상태
   const allSelected = assets.every(a=>selectedAssets.has(a.id)) && showSum;
+  document.getElementById('assetToggles').innerHTML=
+    `<button class="toggle-ctrl" onclick="toggleAll()" style="background:${allSelected?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected?'#fff':'var(--color-text)'}">
+      ${allSelected?'전체 해제':'전체 선택'}</button>
+    <button class="toggle-ctrl" onclick="toggleSum()" style="background:${showSum?'var(--color-accent)':'var(--color-section-bg)'};color:${showSum?'#fff':'var(--color-text)'}">합계</button>`
+function renderToggles(){
+  const allSelected=assets.every(a=>selectedAssets.has(a.id))&&showSum;
   document.getElementById('assetToggles').innerHTML=
     `<button class="toggle-ctrl" onclick="toggleAll()" style="background:${allSelected?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected?'#fff':'var(--color-text)'}">
       ${allSelected?'전체 해제':'전체 선택'}</button>
@@ -2038,6 +2043,7 @@ function renderToggles(){
         onclick="toggleAsset('${a.id}')">${a.name}</button>`;
     }).join('');
 }
+
 function toggleAsset(id){
   selectedAssets.has(id)?selectedAssets.delete(id):selectedAssets.add(id);
   saveChartSel();
