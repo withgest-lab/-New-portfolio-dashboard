@@ -53,9 +53,9 @@ body{background:var(--color-section-bg);color:var(--color-text);font-size:14px;l
 
 /* ── 토글 ── */
 .toggles{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
-.toggle-pill{border:none;cursor:pointer;border-radius:20px;padding:3px 10px;
+.toggle-pill{border:1px solid transparent;cursor:pointer;border-radius:20px;padding:3px 10px;
   font-size:11px;font-weight:600;font-family:inherit;opacity:.35;transition:.15s;}
-.toggle-pill.on{opacity:1;}
+.toggle-pill.on{opacity:1;border-width:1px;}
 .toggle-ctrl{background:var(--color-section-bg);color:var(--color-text);border:none;cursor:pointer;
   border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;font-family:inherit;}
 
@@ -63,10 +63,10 @@ body{background:var(--color-section-bg);color:var(--color-text);font-size:14px;l
 .chart-wrap{margin-top:10px;}
 canvas#lineChart{width:100%!important;display:block;}
 .stat-bar{margin-top:12px;}
-.stat-item{min-width:120px;}
+.stat-item{min-width:110px;}
 .stat-item .stat-lbl{font-size:10px;font-weight:600;color:var(--color-tertiary);}
-.stat-item .stat-val{font-size:13px;font-weight:700;}
-.stat-item .stat-sub{font-size:10px;color:var(--color-tertiary);}
+.stat-item .stat-val{font-size:11px;font-weight:700;}
+.stat-item .stat-sub{font-size:9px;color:var(--color-tertiary);}
 
 /* ── 요약 카드 ── */
 .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
@@ -450,7 +450,19 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
 /* ════════════════════════════════════════
    상수 & 팔레트
 ════════════════════════════════════════ */
-const LINE_COLS  = ['#007aff','#ff9500','#34c759','#af52de','#ff3b30','#5ac8fa','#ff2d55','#30b0c7','#a2845e','#636366'];
+// 빨간/파란 제외, 화사하고 세련된 색상
+const LINE_COLS = [
+  '#FF6B2B', // 딥 오렌지
+  '#9B5DE5', // 보라
+  '#00BBF9', // 하늘
+  '#00F5D4', // 민트
+  '#F15BB5', // 핑크
+  '#FEE440', // 옐로
+  '#06D6A0', // 에메랄드
+  '#FF99C8', // 라이트 핑크
+  '#A8DADC', // 스카이
+  '#8338EC', // 딥 퍼플
+];
 const CAT_COLS   = {stock_kr:'#007aff',stock_us:'#ff9500',stock_jp:'#30b0c7',pension_personal:'#af52de',pension_retirement:'#34c759',crypto:'#ff3b30',cash:'#8e8e93'};
 const ASSET_COLS = ['#5ac8fa','#ffd60a','#30d158','#bf5af2','#ff6961','#32ade6','#ff375f','#6ac4dc','#c8a96e','#aeaeb2'];
 const CAT_LABELS = {stock_kr:'국내주식',stock_us:'미국주식',stock_jp:'일본주식',pension_personal:'개인연금',pension_retirement:'퇴직연금',crypto:'가상자산',cash:'현금'};
@@ -1751,7 +1763,7 @@ function drawLineChart(){
   if(showSum){
     const rawVals=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
     const firstVal=rawVals.find(v=>v>0)||1;
-    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:1.5,isSum:true});
+    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:1.2,isSum:true});
   }
   assets.forEach((a,i)=>{
     if(!selectedAssets.has(a.id)) return;
@@ -1760,32 +1772,70 @@ function drawLineChart(){
     if(firstIdx===-1) return;
     const firstVal=rawVals[firstIdx];
     const pctVals=rawVals.map((v,idx)=>idx<firstIdx?null:(v!=null?((v-firstVal)/firstVal)*100:null));
-    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:LINE_COLS[i%LINE_COLS.length],lw:1.5,assetId:a.id});
+    // 매수/매도 이벤트 감지 (스냅샷 간 5% 이상 급변)
+    const events=[];
+    for(let j=1;j<pctVals.length;j++){
+      const prev=pctVals[j-1],curr=pctVals[j];
+      if(prev==null||curr==null) continue;
+      const jump=curr-prev;
+      if(Math.abs(jump)>=4) events.push({idx:j,type:jump>0?'buy':'sell',jump});
+    }
+    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:LINE_COLS[i%LINE_COLS.length],lw:1.0,assetId:a.id,events});
   });
   if(!lines.length) return;
 
   const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
   if(!allPct.length) return;
   const minP=Math.min(...allPct),maxP=Math.max(...allPct);
-  const pad=(maxP-minP)*0.15||1.0;
-  const minV=minP-pad,maxV=maxP+pad,rng=maxV-minV||1;
+
+  // ── 스마트 Y축 스케일링 ──
+  // IQR 기반 이상치 감지: 정상 범위 종목과 이상치 종목 분리
+  const sortedPct=[...allPct].sort((a,b)=>a-b);
+  const q1=sortedPct[Math.floor(sortedPct.length*0.25)];
+  const q3=sortedPct[Math.floor(sortedPct.length*0.75)];
+  const iqr=q3-q1||1;
+  const lowerFence=q1-iqr*2.5;
+  const upperFence=q3+iqr*2.5;
+
+  // 정상 범위 내 값으로 Y축 설정 (이상치는 클리핑)
+  const normalPct=allPct.filter(v=>v>=lowerFence&&v<=upperFence);
+  const minN=normalPct.length?Math.min(...normalPct):minP;
+  const maxN=normalPct.length?Math.max(...normalPct):maxP;
+  const pad=(maxN-minN)*0.18||1.5;
+  const minV=minN-pad, maxV=maxN+pad, rng=maxV-minV||1;
+
+  // 이상치 여부 판단
+  const hasOutlier=minP<lowerFence||maxP>upperFence;
 
   const toX=i=>chartHistory.length>1?PAD.l+(i/(chartHistory.length-1))*gW:PAD.l+gW*0.5;
-  const toY=v=>PAD.t+(1-(v-minV)/rng)*gH;
+  const toY=v=>PAD.t+(1-Math.max(0,Math.min(1,(v-minV)/rng)))*gH; // 클리핑
 
   // 0% 기준선
   if(minV<=0&&maxV>=0){
     const zeroY=toY(0);
-    ctx.strokeStyle='rgba(128,128,128,.3)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+    ctx.strokeStyle='rgba(128,128,128,.3)';ctx.lineWidth=1;ctx.setLineDash([3,2]);
     ctx.beginPath();ctx.moveTo(PAD.l,zeroY);ctx.lineTo(PAD.l+gW,zeroY);ctx.stroke();
     ctx.setLineDash([]);
   }
 
   // 그리드
-  ctx.strokeStyle='rgba(128,128,128,.08)';ctx.lineWidth=1;
+  ctx.strokeStyle='rgba(128,128,128,.07)';ctx.lineWidth=1;
   for(let r=0;r<=4;r++){
     const y=PAD.t+(r/4)*gH;
     ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
+  }
+
+  // 이상치 있으면 물결 브레이크 표시 (상단/하단)
+  if(hasOutlier){
+    const bY=PAD.t+8;
+    ctx.strokeStyle='rgba(150,150,150,.5)';ctx.lineWidth=1.5;
+    for(let x=PAD.l;x<PAD.l+gW;x+=8){
+      ctx.beginPath();
+      ctx.moveTo(x,bY);ctx.lineTo(x+4,bY-4);ctx.lineTo(x+8,bY);
+      ctx.stroke();
+    }
+    ctx.fillStyle='#8e8e93';ctx.font='9px Pretendard,-apple-system,sans-serif';
+    ctx.textAlign='left';ctx.fillText('※ 이상치 클리핑',PAD.l+2,bY-6);
   }
 
   // Y축 레이블
@@ -1818,45 +1868,51 @@ function drawLineChart(){
     }
   }
 
-  // ── 매수 이벤트 수직 점선 ──
-  // 스냅샷 간 수량 증가 감지 → 매수 시점으로 판단
-  const buyEvents=new Set();
-  for(let i=1;i<chartHistory.length;i++){
-    const prev=chartHistory[i-1].byAsset;
-    const curr=chartHistory[i].byAsset;
-    let isBuy=false;
-    assets.forEach(a=>{
-      const prevVal=prev[a.id]||0;
-      const currVal=curr[a.id]||0;
-      // 현재가가 크게 올랐고(5% 이상) 이전에도 있었던 종목 → 매수 가능성
-      if(prevVal>0&&currVal>0&&(currVal/prevVal)>1.05) isBuy=true;
-    });
-    if(isBuy) buyEvents.add(i);
-  }
-  buyEvents.forEach(i=>{
-    const x=toX(i);
-    ctx.strokeStyle='rgba(100,100,100,.25)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
-    ctx.beginPath();ctx.moveTo(x,PAD.t);ctx.lineTo(x,PAD.t+gH);ctx.stroke();
-    ctx.setLineDash([]);
-    // ▲ 아이콘
-    ctx.fillStyle='rgba(100,100,100,.45)';ctx.font='9px sans-serif';ctx.textAlign='center';
-    ctx.fillText('▲',x,PAD.t+gH+10);
-  });
-
-  // ── 선 그리기 (점선) ──
+  // ── 선 그리기 (얇은 점선) ──
   lines.forEach(line=>{
     ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
-    // 합계는 굵은 점선, 개별 종목은 가는 점선
-    ctx.setLineDash(line.isSum?[6,3]:[4,3]);
+    ctx.setLineDash(line.isSum?[5,2]:[3,2]); // 더 짧고 얇게
     ctx.beginPath();
     let started=false;
     line.vals.forEach((v,i)=>{
       if(v==null) return;
-      if(!started){ctx.moveTo(toX(i),toY(v));started=true;}
-      else{ctx.lineTo(toX(i),toY(v));}
+      const cy=toY(v);
+      if(!started){ctx.moveTo(toX(i),cy);started=true;}
+      else{ctx.lineTo(toX(i),cy);}
     });
     ctx.stroke();
     ctx.setLineDash([]);
+
+    // ── 매수/매도 화살표 ──
+    if(line.events){
+      line.events.forEach(ev=>{
+        const v=line.vals[ev.idx];
+        if(v==null) return;
+        const ex=toX(ev.idx), ey=toY(v);
+        const isBuy=ev.type==='buy';
+        // 화살표 삼각형
+        ctx.fillStyle=line.color;
+        ctx.beginPath();
+        if(isBuy){
+          // 위 화살표 ▲ (선 위에)
+          ctx.moveTo(ex,ey-12);
+          ctx.lineTo(ex-5,ey-5);
+          ctx.lineTo(ex+5,ey-5);
+        } else {
+          // 아래 화살표 ▼ (선 아래에)
+          ctx.moveTo(ex,ey+12);
+          ctx.lineTo(ex-5,ey+5);
+          ctx.lineTo(ex+5,ey+5);
+        }
+        ctx.closePath();ctx.fill();
+        // 이상치면 실제 % 레이블 표시
+        if(Math.abs(ev.jump)>=10){
+          ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
+          ctx.fillStyle=line.color;ctx.textAlign='center';
+          ctx.fillText((ev.jump>=0?'+':'')+ev.jump.toFixed(1)+'%',ex,isBuy?ey-16:ey+22);
+        }
+      });
+    }
 
     // 끝점 원 + 레이블
     const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
@@ -1864,12 +1920,12 @@ function drawLineChart(){
     const lastIdx=line.vals.length-1-lastValidIdx;
     const lastPct=line.vals[lastIdx];
     const lx=toX(lastIdx),ly=toY(lastPct);
-    ctx.beginPath();ctx.arc(lx,ly,3.5,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
-    ctx.beginPath();ctx.arc(lx,ly,2,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+    ctx.beginPath();ctx.arc(lx,ly,3,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
+    ctx.beginPath();ctx.arc(lx,ly,1.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
     const label=(lastPct>=0?'+':'')+lastPct.toFixed(1)+'%';
     ctx.font='bold 10px Pretendard,-apple-system,sans-serif';
     ctx.fillStyle=line.color;ctx.textAlign='left';
-    ctx.fillText(label,Math.min(lx+6,W-PAD.r+2),ly+4);
+    ctx.fillText(label,Math.min(lx+5,W-PAD.r+2),ly+4);
   });
 }
 
@@ -1892,8 +1948,9 @@ function renderStatBar(){
     const hi=Math.max(...vals),lo=Math.min(...vals);
     const diff=last-first,pct=first>0?(diff/first)*100:0;
     const color=a?LINE_COLS[assets.indexOf(a)%LINE_COLS.length]:'#1c1c1e';
+    const itemColor=a?LINE_COLS[assets.indexOf(a)%LINE_COLS.length]:'#555';
     return'<div class="stat-item">'+
-      '<div class="stat-lbl" style="color:#636366;font-weight:600;">'+(a?a.name:'합계')+'</div>'+
+      '<div class="stat-lbl" style="color:'+itemColor+';font-weight:700;">'+(a?a.name:'합계')+'</div>'+
       '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
       '<div class="stat-sub">고: '+fmt(hi)+' · 저: '+fmt(lo)+'</div>'+
     '</div>';
@@ -1910,7 +1967,7 @@ function renderToggles(){
     <button class="toggle-ctrl" onclick="toggleSum()" style="background:${showSum?'var(--color-accent)':'var(--color-section-bg)'};color:${showSum?'#fff':'var(--color-text)'}">합계</button>`
     +assets.map((a,i)=>`
     <button class="toggle-pill ${selectedAssets.has(a.id)?'on':''}"
-      style="background:${LINE_COLS[i%LINE_COLS.length]}22;color:${LINE_COLS[i%LINE_COLS.length]};${selectedAssets.has(a.id)?`outline:2px solid ${LINE_COLS[i%LINE_COLS.length]};outline-offset:-2px`:''}"
+      style="background:${LINE_COLS[i%LINE_COLS.length]}18;color:${LINE_COLS[i%LINE_COLS.length]};border-color:${selectedAssets.has(a.id)?LINE_COLS[i%LINE_COLS.length]:'transparent'};"
       onclick="toggleAsset('${a.id}')">${a.name}</button>`).join('');
 }
 function toggleAsset(id){
