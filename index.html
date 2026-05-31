@@ -1751,13 +1751,16 @@ function drawLineChart(){
   const cv=document.getElementById('lineChart');
   if(!cv) return;
   const dpr=window.devicePixelRatio||1;
-  const W=cv.parentElement.clientWidth||900, H=360;
+  const W=cv.parentElement.clientWidth||900, H=380;
   cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
   cv.style.width=W+'px'; cv.style.height=H+'px';
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
 
-  // PAD: 오른쪽은 이중 Y축 공간 확보
-  const PAD={t:40, r:90, b:52, l:52};
+  // ── PAD 구조 ──
+  // 왼쪽: Y축 숫자(50px)
+  // 오른쪽: 종목명+%(110px) + 우측Y축숫자(50px) = 160px
+  // 상단/하단 여유
+  const PAD={t:44, b:54, l:52, r:160};
   const gW=W-PAD.l-PAD.r, gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
 
@@ -1766,8 +1769,8 @@ function drawLineChart(){
   if(showSum){
     const raw=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
     const fv=raw.find(v=>v>0)||1;
-    lines.push({label:'합계', vals:raw.map(v=>v>0?((v-fv)/fv)*100:null),
-      absVals:raw, color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
+    lines.push({label:'합계',vals:raw.map(v=>v>0?((v-fv)/fv)*100:null),
+      absVals:raw,color:'#2c2c2e',lw:1.8,isSum:true,events:[]});
   }
   assets.forEach((a,i)=>{
     if(!selectedAssets.has(a.id)) return;
@@ -1776,31 +1779,29 @@ function drawLineChart(){
     if(fi===-1) return;
     const fv=raw[fi];
     const pct=raw.map((v,idx)=>idx<fi?null:(v!=null?((v-fv)/fv)*100:null));
-    // 이벤트 감지 (4% 이상 급변)
     const events=[];
     for(let j=1;j<pct.length;j++){
-      const p=pct[j-1], c=pct[j];
-      if(p==null||c==null) continue;
-      const jump=c-p;
+      const p=pct[j-1],cv2=pct[j];
+      if(p==null||cv2==null) continue;
+      const jump=cv2-p;
       if(Math.abs(jump)>=4){
-        const prevAbs=raw[j-1]||0, currAbs=raw[j]||0;
-        const diff=Math.abs(currAbs-prevAbs);
+        const diff=Math.abs((raw[j]||0)-(raw[j-1]||0));
         const px=a.currentPrice||a.avgPrice||1;
         const pkrw=a.currency==='USD'?px*FX.USD:a.currency==='JPY'?px*FX.JPY:px;
         const qty=pkrw>0?Math.round(diff/pkrw):0;
-        events.push({idx:j, type:jump>0?'buy':'sell', jump, qty:qty||null, amt:diff||null});
+        events.push({idx:j,type:jump>0?'buy':'sell',jump,qty:qty||null,amt:diff||null});
       }
     }
     const col=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
-    lines.push({label:a.name, vals:pct, absVals:raw, color:col,
-      lw:1.2, assetId:a.id, events});
+    lines.push({label:a.name,vals:pct,absVals:raw,color:col,
+      lw:1.2,assetId:a.id,events});
   });
   if(!lines.length) return;
 
   const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
   if(!allPct.length) return;
 
-  // ── IQR 이상치 감지 ──
+  // ── IQR 이상치 분리 ──
   const sorted=[...allPct].sort((a,b)=>a-b);
   const q1=sorted[Math.floor(sorted.length*0.25)];
   const q3=sorted[Math.floor(sorted.length*0.75)];
@@ -1810,20 +1811,23 @@ function drawLineChart(){
   const minN=normPct.length?Math.min(...normPct):Math.min(...allPct);
   const maxN=normPct.length?Math.max(...normPct):Math.max(...allPct);
   const pd=(maxN-minN)*0.2||2;
-  const minV=minN-pd, maxV=maxN+pd, rng=maxV-minV||1;
+  const Lmin=minN-pd, Lmax=maxN+pd, Lrng=Lmax-Lmin||1;
 
   const outLines=lines.filter(l=>l.vals.some(v=>v!=null&&(v>uf||v<lf)));
   const hasOut=outLines.length>0;
-  let outMin=0,outMax=0,outRng=1;
+  let Rmin=0,Rmax=1,Rrng=1;
   if(hasOut){
     const op=outLines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
-    outMin=Math.min(...op)*0.98; outMax=Math.max(...op)*1.02;
-    outRng=outMax-outMin||1;
+    Rmin=Math.min(...op)*0.97; Rmax=Math.max(...op)*1.03; Rrng=Rmax-Rmin||1;
   }
 
   const toX=i=>chartHistory.length>1?PAD.l+(i/(chartHistory.length-1))*gW:PAD.l+gW*0.5;
-  const toY=v=>PAD.t+(1-(Math.max(minV,Math.min(maxV,v))-minV)/rng)*gH;
-  const toYO=v=>PAD.t+(1-(v-outMin)/outRng)*gH;
+  const toYL=v=>PAD.t+(1-(Math.max(Lmin,Math.min(Lmax,v))-Lmin)/Lrng)*gH;
+  const toYR=v=>PAD.t+(1-(v-Rmin)/Rrng)*gH;
+
+  // ── 외곽 박스 ──
+  ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.lineWidth=0.8;
+  ctx.strokeRect(PAD.l, PAD.t, gW, gH);
 
   // ── 그리드 ──
   ctx.strokeStyle='rgba(0,0,0,0.06)'; ctx.lineWidth=1;
@@ -1833,36 +1837,42 @@ function drawLineChart(){
   }
 
   // 0% 기준선
-  if(minV<=0&&maxV>=0){
-    const zy=toY(0);
-    ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.lineWidth=1; ctx.setLineDash([3,2]);
-    ctx.beginPath(); ctx.moveTo(PAD.l,zy); ctx.lineTo(PAD.l+gW,zy); ctx.stroke();
+  if(Lmin<=0&&Lmax>=0){
+    ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=1; ctx.setLineDash([3,2]);
+    ctx.beginPath(); ctx.moveTo(PAD.l,toYL(0)); ctx.lineTo(PAD.l+gW,toYL(0)); ctx.stroke();
     ctx.setLineDash([]);
   }
 
-  // ── 왼쪽 Y축 (정상 종목) ──
+  // ── 스냅샷 시간 수직선 ──
+  const snaps=loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+  if(chartHistory.length>1){
+    const t0=chartHistory[0].ts, t1=chartHistory[chartHistory.length-1].ts, tRng=t1-t0||1;
+    snaps.forEach(s=>{
+      if(s.timestamp<t0||s.timestamp>t1) return;
+      const sx=PAD.l+((s.timestamp-t0)/tRng)*gW;
+      ctx.strokeStyle='rgba(0,122,255,0.18)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
+      ctx.beginPath(); ctx.moveTo(sx,PAD.t); ctx.lineTo(sx,PAD.t+gH); ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  }
+
+  // ── 왼쪽 Y축 ──
   ctx.fillStyle='#8e8e93'; ctx.font='10px Pretendard,sans-serif'; ctx.textAlign='right';
   for(let r=0;r<=4;r++){
     const y=PAD.t+(r/4)*gH;
-    const v=maxV-(r/4)*rng;
+    const v=Lmax-(r/4)*Lrng;
     ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', PAD.l-6, y+4);
   }
 
-  // ── 오른쪽 Y축 (이상치 종목, 회색) ──
+  // ── 오른쪽 Y축 (이상치, 박스 오른쪽 끝에 바짝) ──
+  const RAXIS_X=PAD.l+gW+6; // 박스 오른쪽 + 6px
   if(hasOut){
     ctx.fillStyle='#8e8e93'; ctx.textAlign='left';
     for(let r=0;r<=4;r++){
       const y=PAD.t+(r/4)*gH;
-      const v=outMax-(r/4)*outRng;
-      ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', PAD.l+gW+6, y+4);
+      const v=Rmax-(r/4)*Rrng;
+      ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', RAXIS_X, y+4);
     }
-    // 오른쪽 Y축 라벨
-    ctx.save();
-    ctx.translate(PAD.l+gW+PAD.r-10, PAD.t+gH/2);
-    ctx.rotate(Math.PI/2);
-    ctx.font='9px Pretendard,sans-serif'; ctx.fillStyle='#8e8e93'; ctx.textAlign='center';
-    ctx.fillText('이상치 종목 (%)', 0, 0);
-    ctx.restore();
   }
 
   // ── X축 ──
@@ -1876,19 +1886,19 @@ function drawLineChart(){
     const x=toX(idx);
     ctx.textAlign=i===0?'left':(i===xT-1?'right':'center');
     if(['1D','1W','1M'].includes(currentPeriod)){
-      ctx.fillText(mo+'/'+dd, x, H-PAD.b+13);
-      ctx.fillText(hh+':'+mm, x, H-PAD.b+25);
+      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
+      ctx.fillText(hh+':'+mm,x,H-PAD.b+25);
     }else if(['3M','6M','YTD'].includes(currentPeriod)){
-      ctx.fillText(mo+'/'+dd, x, H-PAD.b+13);
+      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
     }else{
-      ctx.fillText(String(d.getFullYear()).slice(2)+'/'+String(mo).padStart(2,'0'), x, H-PAD.b+13);
+      ctx.fillText(String(d.getFullYear()).slice(2)+'/'+String(mo).padStart(2,'0'),x,H-PAD.b+13);
     }
   }
 
   // ── 선 그리기 ──
   lines.forEach(line=>{
     const isOut=outLines.includes(line);
-    const useY=isOut?toYO:toY;
+    const useY=isOut?toYR:toYL;
     ctx.setLineDash([2,1]);
     ctx.strokeStyle=line.color;
     ctx.lineWidth=line.isSum?1.8:1.2;
@@ -1897,14 +1907,13 @@ function drawLineChart(){
     let started=false;
     line.vals.forEach((v,i)=>{
       if(v==null) return;
-      const cy=useY(v);
-      if(!started){ctx.moveTo(toX(i),cy);started=true;}
-      else ctx.lineTo(toX(i),cy);
+      if(!started){ctx.moveTo(toX(i),useY(v));started=true;}
+      else ctx.lineTo(toX(i),useY(v));
     });
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // ── 매수/매도 화살표 + 정보 박스 ──
+    // ── 매수(↑)/매도(↓) 화살표 + 정보 박스 ──
     if(line.events&&line.events.length){
       line.events.forEach(ev=>{
         const v=line.vals[ev.idx];
@@ -1912,52 +1921,42 @@ function drawLineChart(){
         const ex=toX(ev.idx);
         const lineY=useY(v);
         const isBuy=ev.type==='buy';
-        // 매수=↑(위), 매도=↓(아래)
-        const AH=8; // 화살표 높이
+        const AH=8;
+
+        // 화살표: 매수=↑(선 바로 위), 매도=↓(선 바로 아래)
         ctx.fillStyle=line.color;
         ctx.beginPath();
         if(isBuy){
-          // ↑ 위 방향 (선 바로 위에 바짝)
-          const tip=lineY-2;
-          ctx.moveTo(ex,   tip-AH);
-          ctx.lineTo(ex-5, tip);
-          ctx.lineTo(ex+5, tip);
+          // ↑ 꼭짓점이 선 바로 위(lineY-2)
+          ctx.moveTo(ex,       lineY-2);
+          ctx.lineTo(ex-5,     lineY-2+AH);
+          ctx.lineTo(ex+5,     lineY-2+AH);
         } else {
-          // ↓ 아래 방향 (선 바로 아래 바짝)
-          const tip=lineY+2;
-          ctx.moveTo(ex,   tip+AH);
-          ctx.lineTo(ex-5, tip);
-          ctx.lineTo(ex+5, tip);
+          // ↓ 꼭짓점이 선 바로 아래(lineY+2)
+          ctx.moveTo(ex,       lineY+2);
+          ctx.lineTo(ex-5,     lineY+2-AH);
+          ctx.lineTo(ex+5,     lineY+2-AH);
         }
         ctx.closePath(); ctx.fill();
 
-        // 정보 텍스트 (화살표 옆)
+        // 정보 박스 (화살표 위 또는 아래)
         const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
         const typeStr=isBuy?'매입':'매도';
         const qtyStr=ev.qty?ev.qty.toLocaleString()+'주':'';
         const amtStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
-        const infoTxt=`(${[typeStr,qtyStr,amtStr].filter(Boolean).join(', ')})`;
+        const infoTxt=`(${[typeStr,qtyStr,amtStr].filter(Boolean).join(' ')})`;
 
-        ctx.font='bold 8.5px Pretendard,sans-serif';
+        ctx.font='8px Pretendard,sans-serif';
         const tw=ctx.measureText(infoTxt).width;
-        // 박스 위치: 화살표 오른쪽, 화면 밖 방지
-        const bx=Math.min(ex+10, W-PAD.r-tw-10);
-        const by=isBuy?lineY-AH-16:lineY+AH+4;
-        const bpad=4;
-        const bw=tw+bpad*2, bh=14;
-
-        // 박스 배경 (옅은 회색 테두리)
+        // 박스 Y: 매수=화살표 위, 매도=화살표 아래
+        const boxY=isBuy?lineY-2-AH-14:lineY+2+AH+4;
+        const bx=Math.min(ex+8, PAD.l+gW-tw-6);
         ctx.fillStyle='rgba(255,255,255,0.92)';
-        ctx.strokeStyle='rgba(160,160,160,0.5)';
-        ctx.lineWidth=0.7;
-        ctx.beginPath();
-        ctx.roundRect(bx-bpad, by-10, bw, bh, 3);
-        ctx.fill(); ctx.stroke();
-
-        // 텍스트 (회색)
-        ctx.fillStyle='#555';
-        ctx.textAlign='left';
-        ctx.fillText(infoTxt, bx, by);
+        ctx.strokeStyle='rgba(160,160,160,0.4)';
+        ctx.lineWidth=0.6;
+        ctx.beginPath(); ctx.roundRect(bx-3,boxY-10,tw+6,13,2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle='#555'; ctx.textAlign='left';
+        ctx.fillText(infoTxt,bx,boxY);
       });
     }
 
@@ -1969,10 +1968,13 @@ function drawLineChart(){
     const lx=toX(li), ly=useY(lp);
     ctx.beginPath(); ctx.arc(lx,ly,3,0,2*Math.PI); ctx.fillStyle=line.color; ctx.fill();
     ctx.beginPath(); ctx.arc(lx,ly,1.5,0,2*Math.PI); ctx.fillStyle='#fff'; ctx.fill();
-    line._lx=lx; line._ly=ly; line._lp=lp; line._label=line.label;
+    line._lx=lx; line._ly=ly; line._lp=lp;
   });
 
-  // ── 끝 레이블 (종목명 + %) 겹침 방지 ──
+  // ── 종목명 + % (박스 오른쪽, Y축 숫자와 겹치지 않게 분리) ──
+  // 종목명 시작 X = 오른쪽 Y축 숫자 끝 + 여백
+  const LBL_X = hasOut ? RAXIS_X+42 : PAD.l+gW+8;
+
   const labeled=lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
   if(labeled.length){
     labeled[0]._aly=labeled[0]._ly;
@@ -1982,20 +1984,20 @@ function drawLineChart(){
     }
     ctx.font='bold 9px Pretendard,sans-serif'; ctx.textAlign='left';
     labeled.forEach(l=>{
-      const aly=Math.min(PAD.t+gH-2, l._aly);
+      const aly=Math.max(PAD.t+4,Math.min(PAD.t+gH-2,l._aly));
       const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(1)+'%';
-      const txt=l._label+' '+pctStr;
-      // 연결선
+      const txt=l.label+' '+pctStr;
       if(Math.abs(aly-l._ly)>3){
         ctx.strokeStyle=l.color; ctx.lineWidth=0.5; ctx.setLineDash([2,2]);
-        ctx.beginPath(); ctx.moveTo(l._lx+4,l._ly); ctx.lineTo(l._lx+6,aly); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(l._lx+4,l._ly); ctx.lineTo(LBL_X-2,aly); ctx.stroke();
         ctx.setLineDash([]);
       }
       ctx.fillStyle=l.color;
-      ctx.fillText(txt, Math.min(l._lx+7,W-PAD.r+2), aly+3);
+      ctx.fillText(txt, LBL_X, aly+3);
     });
   }
 }
+
 
 function renderStatBar(){
   const bar=document.getElementById('statBar');
