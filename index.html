@@ -1757,18 +1757,16 @@ function drawLineChart(){
   const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
 
   // ── 레이아웃 ──
-  const LNUM=52;   // 왼쪽 Y축 숫자 영역 (박스 밖)
-  const RNUM=52;   // 오른쪽 Y축 숫자 영역 (박스 밖)
-  const TOP=44;    // 상단 여백
-  const BOT=54;    // 하단 X축 여백
-  const PAD_IN=16; // 박스 안쪽 여백
-  const RLABEL=128;// 박스 안 오른쪽 종목명+% 공간
+  const LNUM=52;
+  const RNUM=52;
+  const TOP=64;    // 상단 여백 늘림 → 화살표 정보 박스 잘림 방지
+  const BOT=54;
+  const PAD_IN=16;
+  const RLABEL=128;
 
-  // 박스 좌표 (Y축 숫자는 박스 밖)
   const BL=LNUM, BT=TOP;
   const BW=W-LNUM-RNUM, BH=H-TOP-BOT;
 
-  // 실제 그래프 영역 (박스 안 패딩 적용)
   const gL=BL+PAD_IN;
   const gT=BT+PAD_IN;
   const gW=BW-PAD_IN-RLABEL;
@@ -1886,12 +1884,16 @@ function drawLineChart(){
     ctx.setLineDash([]);
   }
 
-  // ── 스냅샷 수직 점선 ──
+  // ── 스냅샷 수직 점선 (chartHistory 시간축과 동일한 toX 사용) ──
   if(chartHistory.length>1){
-    const t0=chartHistory[0].ts,t1=chartHistory[chartHistory.length-1].ts,tRng=t1-t0||1;
+    const t0=chartHistory[0].ts;
+    const t1=chartHistory[chartHistory.length-1].ts;
+    const tRng=t1-t0||1;
+    // toX와 동일한 계산식 사용 (chartHistory 인덱스 기반이 아닌 시간 기반)
+    const tsToX=ts=>gL+((ts-t0)/tRng)*gW;
     loadSnaps().forEach(s=>{
       if(s.timestamp<t0||s.timestamp>t1) return;
-      const sx=gL+((s.timestamp-t0)/tRng)*gW;
+      const sx=tsToX(s.timestamp);
       ctx.strokeStyle='rgba(0,122,255,0.2)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
       ctx.beginPath(); ctx.moveTo(sx,BT+PAD_IN); ctx.lineTo(sx,BT+BH-PAD_IN); ctx.stroke();
       ctx.setLineDash([]);
@@ -1919,22 +1921,27 @@ function drawLineChart(){
       line.events.forEach(ev=>{
         const v=line.vals[ev.idx]; if(v==null) return;
         const ex=toX(ev.idx), ly=useY(v);
-        const isBuy=ev.type==='buy'; const AH=8;
+        const isBuy=ev.type==='buy'; const AH=9;
+
         ctx.fillStyle=line.color; ctx.beginPath();
         if(isBuy){
-          // 매수↑: 꼭짓점이 선 위(ly-2), 화살표는 선 위쪽
-          ctx.moveTo(ex,     ly-2);
-          ctx.lineTo(ex-5,   ly-2+AH);
-          ctx.lineTo(ex+5,   ly-2+AH);
+          // 매수 ↑: 삼각형 꼭짓점이 위, 밑변이 아래 → 위쪽 화살표
+          // 화살표는 선 위쪽에 위치 (선에서 위로 떨어져서)
+          const tip=ly-4;           // 꼭짓점 (선보다 4px 위)
+          ctx.moveTo(ex,   tip);    // 꼭짓점 (위)
+          ctx.lineTo(ex-6, tip+AH); // 왼쪽 아래
+          ctx.lineTo(ex+6, tip+AH); // 오른쪽 아래
         } else {
-          // 매도↓: 꼭짓점이 선 아래(ly+2), 화살표는 선 아래쪽
-          ctx.moveTo(ex,     ly+2);
-          ctx.lineTo(ex-5,   ly+2-AH);
-          ctx.lineTo(ex+5,   ly+2-AH);
+          // 매도 ↓: 삼각형 꼭짓점이 아래, 밑변이 위 → 아래쪽 화살표
+          // 화살표는 선 아래쪽에 위치
+          const tip=ly+4;           // 꼭짓점 (선보다 4px 아래)
+          ctx.moveTo(ex,   tip);    // 꼭짓점 (아래)
+          ctx.lineTo(ex-6, tip-AH); // 왼쪽 위
+          ctx.lineTo(ex+6, tip-AH); // 오른쪽 위
         }
         ctx.closePath(); ctx.fill();
 
-        // 정보 박스
+        // 정보 박스: 화살표 위(매수) 또는 아래(매도)
         const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
         const typeStr=isBuy?'매입':'매도';
         const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
@@ -1942,8 +1949,9 @@ function drawLineChart(){
         const txt=`(${[typeStr,qStr,aStr].filter(Boolean).join(', ')})`;
         ctx.font='8px Pretendard,sans-serif';
         const tw=ctx.measureText(txt).width;
-        // 박스 위치: 화살표 위(매수) 또는 아래(매도)
-        const bxY=isBuy?ly-2-AH-15:ly+2+AH+5;
+        const bxY=isBuy
+          ? Math.max(BT+4, ly-4-AH-15) // 매수: 화살표 위 (박스 상단 밖으로 안 나가게)
+          : Math.min(BT+BH-4, ly+4+AH+5); // 매도: 화살표 아래
         const bx=Math.min(ex+8, gL+gW-tw-4);
         ctx.fillStyle='rgba(255,255,255,0.93)';
         ctx.strokeStyle='rgba(160,160,160,0.4)'; ctx.lineWidth=0.6;
