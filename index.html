@@ -1749,264 +1749,254 @@ async function buildChartHistory(){
 
 function drawLineChart(){
   const cv=document.getElementById('lineChart');
+  if(!cv) return;
   const dpr=window.devicePixelRatio||1;
-  const W=cv.parentElement.clientWidth||900, H=340; // ③ 높이 확대
-  cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
-  cv.style.width=W+'px';cv.style.height=H+'px';
-  const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
-  const PAD={t:36,r:62,b:52,l:48}; // ④ 상단 패딩 확대
+  const W=cv.parentElement.clientWidth||900, H=360;
+  cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H);
+
+  // PAD: 오른쪽은 이중 Y축 공간 확보
+  const PAD={t:40, r:90, b:52, l:52};
   const gW=W-PAD.l-PAD.r, gH=H-PAD.t-PAD.b;
   if(!chartHistory.length) return;
 
-  // % 변화율
+  // ── % 변화율 계산 ──
   const lines=[];
   if(showSum){
-    const rawVals=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    const firstVal=rawVals.find(v=>v>0)||1;
-    lines.push({label:'합계',vals:rawVals.map(v=>v>0?((v-firstVal)/firstVal)*100:null),absVals:rawVals,color:'#1c1c1e',lw:1.2,isSum:true});
+    const raw=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
+    const fv=raw.find(v=>v>0)||1;
+    lines.push({label:'합계', vals:raw.map(v=>v>0?((v-fv)/fv)*100:null),
+      absVals:raw, color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
   assets.forEach((a,i)=>{
     if(!selectedAssets.has(a.id)) return;
-    const rawVals=chartHistory.map(h=>h.byAsset[a.id]??null);
-    const firstIdx=rawVals.findIndex(v=>v!=null&&v>0);
-    if(firstIdx===-1) return;
-    const firstVal=rawVals[firstIdx];
-    const pctVals=rawVals.map((v,idx)=>idx<firstIdx?null:(v!=null?((v-firstVal)/firstVal)*100:null));
+    const raw=chartHistory.map(h=>h.byAsset[a.id]??null);
+    const fi=raw.findIndex(v=>v!=null&&v>0);
+    if(fi===-1) return;
+    const fv=raw[fi];
+    const pct=raw.map((v,idx)=>idx<fi?null:(v!=null?((v-fv)/fv)*100:null));
+    // 이벤트 감지 (4% 이상 급변)
     const events=[];
-    for(let j=1;j<pctVals.length;j++){
-      const prev=pctVals[j-1],curr=pctVals[j];
-      if(prev==null||curr==null) continue;
-      const jump=curr-prev;
+    for(let j=1;j<pct.length;j++){
+      const p=pct[j-1], c=pct[j];
+      if(p==null||c==null) continue;
+      const jump=c-p;
       if(Math.abs(jump)>=4){
-        // 수량·금액 변화 감지
-        const prevAbs=rawVals[j-1]||0;
-        const currAbs=rawVals[j]||0;
-        const absDiff=currAbs-prevAbs;
-        // 수량 추정: 금액 변화 / 현재가 (KRW 환산)
-        const curPrice=a.currentPrice||a.avgPrice||1;
-        const priceKRW=a.currency==='USD'?curPrice*FX.USD:a.currency==='JPY'?curPrice*FX.JPY:curPrice;
-        const qtyEst=priceKRW>0?Math.round(Math.abs(absDiff)/priceKRW):0;
-        events.push({
-          idx:j, type:jump>0?'buy':'sell', jump,
-          qty:qtyEst||null,
-          amt:Math.abs(absDiff)||null
-        });
+        const prevAbs=raw[j-1]||0, currAbs=raw[j]||0;
+        const diff=Math.abs(currAbs-prevAbs);
+        const px=a.currentPrice||a.avgPrice||1;
+        const pkrw=a.currency==='USD'?px*FX.USD:a.currency==='JPY'?px*FX.JPY:px;
+        const qty=pkrw>0?Math.round(diff/pkrw):0;
+        events.push({idx:j, type:jump>0?'buy':'sell', jump, qty:qty||null, amt:diff||null});
       }
     }
-    const lineColor=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
-    lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:lineColor,lw:1.0,assetId:a.id,events});
+    const col=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
+    lines.push({label:a.name, vals:pct, absVals:raw, color:col,
+      lw:1.2, assetId:a.id, events});
   });
   if(!lines.length) return;
 
   const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
   if(!allPct.length) return;
-  const minP=Math.min(...allPct), maxP=Math.max(...allPct);
 
-  // IQR 이상치 감지
-  const sortedPct=[...allPct].sort((a,b)=>a-b);
-  const q1=sortedPct[Math.floor(sortedPct.length*0.25)];
-  const q3=sortedPct[Math.floor(sortedPct.length*0.75)];
+  // ── IQR 이상치 감지 ──
+  const sorted=[...allPct].sort((a,b)=>a-b);
+  const q1=sorted[Math.floor(sorted.length*0.25)];
+  const q3=sorted[Math.floor(sorted.length*0.75)];
   const iqr=q3-q1||1;
-  const lowerFence=q1-iqr*2.5, upperFence=q3+iqr*2.5;
-  const normalPct=allPct.filter(v=>v>=lowerFence&&v<=upperFence);
-  const minN=normalPct.length?Math.min(...normalPct):minP;
-  const maxN=normalPct.length?Math.max(...normalPct):maxP;
-  const pad=(maxN-minN)*0.2||1.5;
-  const minV=minN-pad, maxV=maxN+pad, rng=maxV-minV||1;
+  const lf=q1-iqr*2.5, uf=q3+iqr*2.5;
+  const normPct=allPct.filter(v=>v>=lf&&v<=uf);
+  const minN=normPct.length?Math.min(...normPct):Math.min(...allPct);
+  const maxN=normPct.length?Math.max(...normPct):Math.max(...allPct);
+  const pd=(maxN-minN)*0.2||2;
+  const minV=minN-pd, maxV=maxN+pd, rng=maxV-minV||1;
 
-  // 이상치 선 분류
-  const outlierLines=lines.filter(l=>l.vals.some(v=>v!=null&&(v>upperFence||v<lowerFence)));
-  const outlierPcts=outlierLines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
-  const hasOutlier=outlierLines.length>0;
-  // 이상치 Y축 (오른쪽): 이상치 선들의 범위
-  let outMinV=0,outMaxV=0,outRng=1;
-  if(hasOutlier){
-    outMinV=Math.min(...outlierPcts)*0.98;
-    outMaxV=Math.max(...outlierPcts)*1.02;
-    outRng=outMaxV-outMinV||1;
+  const outLines=lines.filter(l=>l.vals.some(v=>v!=null&&(v>uf||v<lf)));
+  const hasOut=outLines.length>0;
+  let outMin=0,outMax=0,outRng=1;
+  if(hasOut){
+    const op=outLines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
+    outMin=Math.min(...op)*0.98; outMax=Math.max(...op)*1.02;
+    outRng=outMax-outMin||1;
   }
-  // 이상치 toY (오른쪽 Y축)
-  const toYOut=v=>PAD.t+(1-(v-outMinV)/outRng)*gH;
 
   const toX=i=>chartHistory.length>1?PAD.l+(i/(chartHistory.length-1))*gW:PAD.l+gW*0.5;
-  // ① 클리핑 없이 — 이상치는 경계에 고정하되 화살표는 실제 위치로
-  const toY=v=>{
-    const clamped=Math.max(minV,Math.min(maxV,v));
-    return PAD.t+(1-(clamped-minV)/rng)*gH;
-  };
+  const toY=v=>PAD.t+(1-(Math.max(minV,Math.min(maxV,v))-minV)/rng)*gH;
+  const toYO=v=>PAD.t+(1-(v-outMin)/outRng)*gH;
+
+  // ── 그리드 ──
+  ctx.strokeStyle='rgba(0,0,0,0.06)'; ctx.lineWidth=1;
+  for(let r=0;r<=4;r++){
+    const y=PAD.t+(r/4)*gH;
+    ctx.beginPath(); ctx.moveTo(PAD.l,y); ctx.lineTo(PAD.l+gW,y); ctx.stroke();
+  }
 
   // 0% 기준선
   if(minV<=0&&maxV>=0){
-    ctx.strokeStyle='rgba(128,128,128,.25)';ctx.lineWidth=1;ctx.setLineDash([3,2]);
-    ctx.beginPath();ctx.moveTo(PAD.l,toY(0));ctx.lineTo(PAD.l+gW,toY(0));ctx.stroke();
+    const zy=toY(0);
+    ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.lineWidth=1; ctx.setLineDash([3,2]);
+    ctx.beginPath(); ctx.moveTo(PAD.l,zy); ctx.lineTo(PAD.l+gW,zy); ctx.stroke();
     ctx.setLineDash([]);
   }
 
-  // 그리드
-  ctx.strokeStyle='rgba(128,128,128,.07)';ctx.lineWidth=1;
+  // ── 왼쪽 Y축 (정상 종목) ──
+  ctx.fillStyle='#8e8e93'; ctx.font='10px Pretendard,sans-serif'; ctx.textAlign='right';
   for(let r=0;r<=4;r++){
     const y=PAD.t+(r/4)*gH;
-    ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(PAD.l+gW,y);ctx.stroke();
+    const v=maxV-(r/4)*rng;
+    ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', PAD.l-6, y+4);
   }
 
-  // 이상치 물결선 (상단 아주 얇게)
-  // 오른쪽 Y축 레이블 (이상치 종목, 회색)
-  if(hasOutlier){
-    ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='left';
+  // ── 오른쪽 Y축 (이상치 종목, 회색) ──
+  if(hasOut){
+    ctx.fillStyle='#8e8e93'; ctx.textAlign='left';
     for(let r=0;r<=4;r++){
       const y=PAD.t+(r/4)*gH;
-      const val=outMaxV-(r/4)*outRng;
-      ctx.fillText((val>=0?'+':'')+val.toFixed(1)+'%',PAD.l+gW+4,y+4);
+      const v=outMax-(r/4)*outRng;
+      ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', PAD.l+gW+6, y+4);
     }
+    // 오른쪽 Y축 라벨
+    ctx.save();
+    ctx.translate(PAD.l+gW+PAD.r-10, PAD.t+gH/2);
+    ctx.rotate(Math.PI/2);
+    ctx.font='9px Pretendard,sans-serif'; ctx.fillStyle='#8e8e93'; ctx.textAlign='center';
+    ctx.fillText('이상치 종목 (%)', 0, 0);
+    ctx.restore();
   }
 
-  // Y축 레이블 (왼쪽, 정상 종목)
-  ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='right';
-  for(let r=0;r<=4;r++){
-    const y=PAD.t+(r/4)*gH;
-    const val=maxV-(r/4)*rng;
-    ctx.fillText((val>=0?'+':'')+val.toFixed(1)+'%',PAD.l-5,y+4);
-  }
-
-  // X축
-  ctx.font='10px Pretendard,-apple-system,sans-serif';
+  // ── X축 ──
+  ctx.font='10px Pretendard,sans-serif'; ctx.fillStyle='#8e8e93';
   const xT=Math.max(2,Math.min(6,chartHistory.length));
   for(let i=0;i<xT;i++){
     const idx=xT>1?Math.round(i/(xT-1)*(chartHistory.length-1)):0;
-    const ts=chartHistory[Math.min(idx,chartHistory.length-1)].ts;
-    const d=new Date(ts);
+    const d=new Date(chartHistory[Math.min(idx,chartHistory.length-1)].ts);
     const mo=d.getMonth()+1,dd=d.getDate();
     const hh=String(d.getHours()).padStart(2,'0'),mm=String(d.getMinutes()).padStart(2,'0');
     const x=toX(idx);
     ctx.textAlign=i===0?'left':(i===xT-1?'right':'center');
-    ctx.fillStyle='#8e8e93';
     if(['1D','1W','1M'].includes(currentPeriod)){
-      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
-      ctx.fillText(hh+':'+mm,x,H-PAD.b+25);
+      ctx.fillText(mo+'/'+dd, x, H-PAD.b+13);
+      ctx.fillText(hh+':'+mm, x, H-PAD.b+25);
     }else if(['3M','6M','YTD'].includes(currentPeriod)){
-      ctx.fillText(mo+'/'+dd,x,H-PAD.b+13);
+      ctx.fillText(mo+'/'+dd, x, H-PAD.b+13);
     }else{
-      ctx.fillText(String(d.getFullYear()).slice(2)+'/'+String(mo).padStart(2,'0'),x,H-PAD.b+13);
+      ctx.fillText(String(d.getFullYear()).slice(2)+'/'+String(mo).padStart(2,'0'), x, H-PAD.b+13);
     }
   }
 
   // ── 선 그리기 ──
   lines.forEach(line=>{
-    const isOut=outlierLines.includes(line);
-    const useToY=isOut?toYOut:toY;
+    const isOut=outLines.includes(line);
+    const useY=isOut?toYO:toY;
     ctx.setLineDash([2,1]);
     ctx.strokeStyle=line.color;
-    ctx.lineWidth=line.isSum?1.6:1.0;
-    ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.lineWidth=line.isSum?1.8:1.2;
+    ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath();
     let started=false;
     line.vals.forEach((v,i)=>{
       if(v==null) return;
-      const cy=useToY(v);
+      const cy=useY(v);
       if(!started){ctx.moveTo(toX(i),cy);started=true;}
-      else{ctx.lineTo(toX(i),cy);}
+      else ctx.lineTo(toX(i),cy);
     });
     ctx.stroke();
     ctx.setLineDash([]);
 
     // ── 매수/매도 화살표 + 정보 박스 ──
-    if(line.events){
+    if(line.events&&line.events.length){
       line.events.forEach(ev=>{
         const v=line.vals[ev.idx];
         if(v==null) return;
         const ex=toX(ev.idx);
-        const lineY=useToY(v); // 점선 위치
+        const lineY=useY(v);
         const isBuy=ev.type==='buy';
-
-        // 화살표: 점선 바로 아래 바짝 붙임
-        const arrowTop=lineY+1;   // 점선 바로 아래 1px
-        const arrowH=7;
+        // 매수=↑(위), 매도=↓(아래)
+        const AH=8; // 화살표 높이
         ctx.fillStyle=line.color;
         ctx.beginPath();
         if(isBuy){
-          // ▼ 아래방향 (매수: 자금 투입)
-          ctx.moveTo(ex-5,arrowTop);
-          ctx.lineTo(ex+5,arrowTop);
-          ctx.lineTo(ex,  arrowTop+arrowH);
+          // ↑ 위 방향 (선 바로 위에 바짝)
+          const tip=lineY-2;
+          ctx.moveTo(ex,   tip-AH);
+          ctx.lineTo(ex-5, tip);
+          ctx.lineTo(ex+5, tip);
         } else {
-          // ▲ 위방향 (매도: 자금 회수)
-          ctx.moveTo(ex-5,arrowTop+arrowH);
-          ctx.lineTo(ex+5,arrowTop+arrowH);
-          ctx.lineTo(ex,  arrowTop);
+          // ↓ 아래 방향 (선 바로 아래 바짝)
+          const tip=lineY+2;
+          ctx.moveTo(ex,   tip+AH);
+          ctx.lineTo(ex-5, tip);
+          ctx.lineTo(ex+5, tip);
         }
-        ctx.closePath();ctx.fill();
+        ctx.closePath(); ctx.fill();
 
-        // 정보 박스 (화살표 오른쪽)
-        const boxX=ex+10;
-        const boxY=lineY+1;
+        // 정보 텍스트 (화살표 옆)
         const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
-        const label=isBuy?'매입':'매도';
+        const typeStr=isBuy?'매입':'매도';
         const qtyStr=ev.qty?ev.qty.toLocaleString()+'주':'';
-        const amtStr=ev.amt?sym+(ev.amt/10000).toFixed(0)+'만':'';
+        const amtStr=ev.amt?sym+Math.round(ev.amt/10000).toLocaleString()+'만':'';
+        const infoTxt=`(${[typeStr,qtyStr,amtStr].filter(Boolean).join(', ')})`;
 
-        const rows=[label, qtyStr, amtStr].filter(Boolean);
-        const BW=70, LH=11, BH=rows.length*LH+8;
+        ctx.font='bold 8.5px Pretendard,sans-serif';
+        const tw=ctx.measureText(infoTxt).width;
+        // 박스 위치: 화살표 오른쪽, 화면 밖 방지
+        const bx=Math.min(ex+10, W-PAD.r-tw-10);
+        const by=isBuy?lineY-AH-16:lineY+AH+4;
+        const bpad=4;
+        const bw=tw+bpad*2, bh=14;
 
-        // 박스 배경
-        ctx.fillStyle='rgba(255,255,255,0.93)';
-        ctx.strokeStyle=line.color;
-        ctx.lineWidth=0.8;
+        // 박스 배경 (옅은 회색 테두리)
+        ctx.fillStyle='rgba(255,255,255,0.92)';
+        ctx.strokeStyle='rgba(160,160,160,0.5)';
+        ctx.lineWidth=0.7;
         ctx.beginPath();
-        const br=3;
-        const bx=Math.min(boxX,W-PAD.r-BW-4);
-        ctx.roundRect(bx,boxY,BW,BH,br);
-        ctx.fill();ctx.stroke();
+        ctx.roundRect(bx-bpad, by-10, bw, bh, 3);
+        ctx.fill(); ctx.stroke();
 
-        // 첫 줄: 매입/매도 (종목 색, 굵게)
-        ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
-        ctx.fillStyle=line.color;
+        // 텍스트 (회색)
+        ctx.fillStyle='#555';
         ctx.textAlign='left';
-        ctx.fillText(rows[0],bx+5,boxY+LH);
-
-        // 나머지 줄: 회색
-        ctx.font='8px Pretendard,-apple-system,sans-serif';
-        ctx.fillStyle='rgba(60,60,60,0.8)';
-        rows.slice(1).forEach((r,i)=>{
-          ctx.fillText(r,bx+5,boxY+(i+2)*LH);
-        });
+        ctx.fillText(infoTxt, bx, by);
       });
     }
 
     // 끝점 원
-    const lastValidIdx=[...line.vals].reverse().findIndex(v=>v!=null);
-    if(lastValidIdx===-1) return;
-    const lastIdx=line.vals.length-1-lastValidIdx;
-    const lastPct=line.vals[lastIdx];
-    const lx=toX(lastIdx), ly=useToY(lastPct);
-    ctx.beginPath();ctx.arc(lx,ly,3,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
-    ctx.beginPath();ctx.arc(lx,ly,1.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
-    line._lx=lx;line._ly=ly;line._lastPct=lastPct;
+    const lvi=[...line.vals].reverse().findIndex(v=>v!=null);
+    if(lvi===-1) return;
+    const li=line.vals.length-1-lvi;
+    const lp=line.vals[li];
+    const lx=toX(li), ly=useY(lp);
+    ctx.beginPath(); ctx.arc(lx,ly,3,0,2*Math.PI); ctx.fillStyle=line.color; ctx.fill();
+    ctx.beginPath(); ctx.arc(lx,ly,1.5,0,2*Math.PI); ctx.fillStyle='#fff'; ctx.fill();
+    line._lx=lx; line._ly=ly; line._lp=lp; line._label=line.label;
   });
 
-  // ── 끝 레이블 겹침 방지 ──
+  // ── 끝 레이블 (종목명 + %) 겹침 방지 ──
   const labeled=lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
-  const LABEL_H=13;
-  // ② 첫 항목 초기화를 루프 전에
-  if(labeled.length>0) labeled[0]._adjLy=labeled[0]._ly;
-  for(let i=1;i<labeled.length;i++){
-    labeled[i]._adjLy=(labeled[i]._ly-labeled[i-1]._adjLy<LABEL_H)
-      ? labeled[i-1]._adjLy+LABEL_H
-      : labeled[i]._ly;
-  }
-  labeled.forEach(line=>{
-    if(line._ly==null) return;
-    const adjLy=Math.min(PAD.t+gH-2, line._adjLy??line._ly); // 하단 경계 안
-    const label=(line._lastPct>=0?'+':'')+line._lastPct.toFixed(1)+'%';
-    ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
-    ctx.fillStyle=line.color;ctx.textAlign='left';
-    if(Math.abs(adjLy-line._ly)>3){
-      ctx.strokeStyle=line.color;ctx.lineWidth=0.5;ctx.setLineDash([2,2]);
-      ctx.beginPath();ctx.moveTo(line._lx+4,line._ly);ctx.lineTo(line._lx+6,adjLy);ctx.stroke();
-      ctx.setLineDash([]);
+  if(labeled.length){
+    labeled[0]._aly=labeled[0]._ly;
+    for(let i=1;i<labeled.length;i++){
+      labeled[i]._aly=(labeled[i]._ly-labeled[i-1]._aly<13)
+        ?labeled[i-1]._aly+13:labeled[i]._ly;
     }
-    ctx.fillText(label,Math.min(line._lx+7,W-4),adjLy+3);
-  });
+    ctx.font='bold 9px Pretendard,sans-serif'; ctx.textAlign='left';
+    labeled.forEach(l=>{
+      const aly=Math.min(PAD.t+gH-2, l._aly);
+      const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(1)+'%';
+      const txt=l._label+' '+pctStr;
+      // 연결선
+      if(Math.abs(aly-l._ly)>3){
+        ctx.strokeStyle=l.color; ctx.lineWidth=0.5; ctx.setLineDash([2,2]);
+        ctx.beginPath(); ctx.moveTo(l._lx+4,l._ly); ctx.lineTo(l._lx+6,aly); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle=l.color;
+      ctx.fillText(txt, Math.min(l._lx+7,W-PAD.r+2), aly+3);
+    });
+  }
 }
+
 function renderStatBar(){
   const bar=document.getElementById('statBar');
   const items=[
@@ -2178,7 +2168,14 @@ function confirmSaveSheets(){
 /* ════════════════════════════════════════
    자동 스냅샷 (시장 사이클 7회)
 ════════════════════════════════════════ */
-const AUTO_SNAP_TIMES = Array.from({length:24}, (_,h) => ({h, m:0}));
+// 자동 스냅샷 시간 (한국 시간 기준)
+// 22:30, 23:30, 03:00, 05:00, 06:00, 09:00, 10:00, 12:00, 15:00, 15:30
+const AUTO_SNAP_TIMES = [
+  {h:22,m:30}, {h:23,m:30},
+  {h: 3,m: 0}, {h: 5,m: 0}, {h: 6,m: 0},
+  {h: 9,m: 0}, {h:10,m: 0}, {h:12,m: 0},
+  {h:15,m: 0}, {h:15,m:30},
+];
 // 매시 정각 자동 저장 (하루 24회)
 // snapFiredDate를 localStorage에 저장 → 페이지 새로고침 후에도 중복 저장 방지
 
@@ -2200,14 +2197,23 @@ setInterval(async()=>{
   const now = new Date();
   const h = now.getHours();
   const m = now.getMinutes();
-  AUTO_SNAP_TIMES.forEach(t=>{
-    // 정각 ±1분 이내면 저장 (30초 체크 주기로 놓치지 않도록)
-    const diffMin = (h * 60 + m) - (t.h * 60 + t.m);
-    if(Math.abs(diffMin) <= 1 && !wasSnapFired(t.h, t.m)){
-      markSnapFired(t.h, t.m);
-      fetchAllPrices(true); // 시세 갱신 + 스냅샷 저장
+  for(const t of AUTO_SNAP_TIMES){
+    const diffMin = (h*60+m) - (t.h*60+t.m);
+    if(Math.abs(diffMin)<=1 && !wasSnapFired(t.h,t.m)){
+      markSnapFired(t.h,t.m);
+      try{
+        await fetchAllPrices(true); // 시세 갱신 + 자동 스냅샷
+      } catch(e){
+        // 자동 스냅샷 실패 시 에러 없이 수동 스냅샷 참조
+        console.warn('자동 스냅샷 실패, 수동 스냅샷 참조:', e);
+        // 최근 수동 스냅샷이 있으면 그래프는 정상 동작
+        const snaps = loadSnaps();
+        if(snaps.length > 0){
+          buildChartHistory(); // 기존 스냅샷으로 그래프 재구성
+        }
+      }
     }
-  });
+  }
 }, 30000);
 
 /* ════════════════════════════════════════
