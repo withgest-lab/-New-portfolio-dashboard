@@ -191,7 +191,7 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
       <span id="fxDisplay" style="font-size:10px;color:var(--color-tertiary);margin-left:6px;"></span>
     </div>
     <button class="btn btn-green" onclick="fetchAllPrices(false)">🔄 시세 갱신</button>
-    <button class="btn btn-primary" onclick="saveSnap()">📸 스냅샷</button>
+    <button class="btn btn-primary" onclick="saveSnap(true)">📸 스냅샷</button>
     <button class="btn btn-sheets" onclick="openSheetsModal()">📤 구글 시트</button>
   </div>
 </div>
@@ -691,10 +691,16 @@ async function fetchAllPrices(saveSnapshot=false){
     const t=new Date().toLocaleTimeString('ko-KR');
     if(ok>0){
       setStatus('ok',`갱신 완료 ${t} · ${ok}개`);
-      if(saveSnapshot) saveSnap(); // 명시적으로 요청된 경우에만 저장
+    } else {
+      setStatus('err','시세 조회 실패 — LTE로 시도하세요');
     }
-    else{setStatus('err','시세 조회 실패 — LTE로 시도하세요');}
-  }catch(e){setStatus('err','오류: '+e.message);}
+    // ★ 자동 스냅샷: 시세 성공 여부와 무관하게 저장 (환율만 갱신돼도 의미 있음)
+    if(saveSnapshot) saveSnap();
+  }catch(e){
+    setStatus('err','오류: '+e.message);
+    // ★ 에러여도 스냅샷 요청이면 현재 값으로 저장 시도
+    if(saveSnapshot) try{ saveSnap(); }catch(e2){}
+  }
   finally{isFetching=false;}
 }
 
@@ -743,27 +749,30 @@ function loadSnaps(){
 function saveSnaps(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
 
 function compressSnaps(snaps) {
-  // 오래된 스냅샷을 기간별로 압축해서 500개 한도 안에 10년 데이터 보존
   const now   = Date.now();
   const MIN   = 60000;
   const HOUR  = 60 * MIN;
   const DAY   = 24 * HOUR;
 
   const rules = [
-    { maxAge:  2*DAY,     keepEvery:  1*HOUR  }, // 최근 2일: 1시간마다
-    { maxAge: 14*DAY,     keepEvery:  6*HOUR  }, // 2일~2주: 6시간마다
-    { maxAge: 90*DAY,     keepEvery:  1*DAY   }, // 2주~3달: 하루 1회
-    { maxAge: 365*DAY,    keepEvery:  7*DAY   }, // 3달~1년: 주 1회
-    { maxAge: 3*365*DAY,  keepEvery: 15*DAY   }, // 1년~3년: 월 2회
-    { maxAge: 10*365*DAY, keepEvery: 30*DAY   }, // 3년~10년: 월 1회
+    { maxAge:  2*DAY,     keepEvery:  1*HOUR  },
+    { maxAge: 14*DAY,     keepEvery:  6*HOUR  },
+    { maxAge: 90*DAY,     keepEvery:  1*DAY   },
+    { maxAge: 365*DAY,    keepEvery:  7*DAY   },
+    { maxAge: 3*365*DAY,  keepEvery: 15*DAY   },
+    { maxAge: 10*365*DAY, keepEvery: 30*DAY   },
   ];
 
-  // 각 스냅샷이 해당 규칙에서 유지할 대표 스냅샷인지 확인
   const sorted = [...snaps].sort((a,b) => a.timestamp - b.timestamp);
   const kept = [];
-  const buckets = new Set(); // 버킷 키로 중복 방지
+  const buckets = new Set();
 
   for (const snap of sorted) {
+    // ★ 수동 스냅샷(manual:true)은 압축 규칙 무시하고 항상 보존
+    if(snap.manual){
+      kept.push(snap);
+      continue;
+    }
     const age = now - snap.timestamp;
     const rule = rules.find(r => age <= r.maxAge) || rules[rules.length-1];
     const bucketKey = Math.floor(snap.timestamp / rule.keepEvery);
@@ -783,13 +792,14 @@ function compressSnaps(snaps) {
   return kept.sort((a,b) => a.timestamp - b.timestamp);
 }
 
-function saveSnap(){
+function saveSnap(isManual=false){
   const total = totalEv();
   if(total < 1000000) return;
   const byAsset = Object.fromEntries(assets.map(a=>[a.id, Math.round(evKRW(a))]));
   let snaps = loadSnaps();
-  snaps.push({id:uid(), timestamp:Date.now(), totalValue:Math.round(total), byAsset});
-  snaps = compressSnaps(snaps); // 압축 적용
+  // ★ 수동 스냅샷 표시 (manual:true → 압축 시 항상 보존)
+  snaps.push({id:uid(), timestamp:Date.now(), totalValue:Math.round(total), byAsset, manual:isManual});
+  snaps = compressSnaps(snaps);
   saveSnaps(snaps);
   renderSnaps();
 }
@@ -833,7 +843,7 @@ function renderSnaps(){
     const diff=prev?s.totalValue-prev.totalValue:null;
     const pct=prev&&prev.totalValue>0?(diff/prev.totalValue)*100:null;
     return`<tr>
-      <td style="text-align:left">${new Date(s.timestamp).toLocaleString('ko-KR')}</td>
+      <td style="text-align:left">${new Date(s.timestamp).toLocaleString('ko-KR')}${s.manual?'<span style="font-size:9px;color:#007aff;margin-left:4px;">수동</span>':''}</td>
       <td>${fmt(s.totalValue)}</td>
       <td class="col-hide ${diff===null?'':(diff>=0?'up':'dn')}">${diff===null?'—':(diff>=0?'+':'')+fmt(diff)}</td>
       <td class="${pct===null?'':(pct>=0?'up':'dn')}">${pct===null?'—':fmtPct(pct)}</td>
@@ -2433,22 +2443,25 @@ function markSnapFired(h, m) {
 
 setInterval(async()=>{
   const now = new Date();
+  const day = now.getDay(); // 0=일, 6=토
+
+  // ★ 주말(토/일)은 자동 스냅샷 동작하지 않음
+  if(day===0 || day===6) return;
+
   const h = now.getHours();
   const m = now.getMinutes();
   for(const t of AUTO_SNAP_TIMES){
     const diffMin = (h*60+m) - (t.h*60+t.m);
     if(Math.abs(diffMin)<=1 && !wasSnapFired(t.h,t.m)){
+      // ★ markSnapFired를 먼저 호출해 중복 방지 (fetchAllPrices 실패해도 재시도 안 함)
       markSnapFired(t.h,t.m);
       try{
-        await fetchAllPrices(true); // 시세 갱신 + 자동 스냅샷
+        await fetchAllPrices(true);
       } catch(e){
-        // 자동 스냅샷 실패 시 에러 없이 수동 스냅샷 참조
-        console.warn('자동 스냅샷 실패, 수동 스냅샷 참조:', e);
-        // 최근 수동 스냅샷이 있으면 그래프는 정상 동작
+        console.warn('자동 스냅샷 실패, 현재 값으로 직접 저장 시도:', e);
+        try{ saveSnap(); } catch(e2){}
         const snaps = loadSnaps();
-        if(snaps.length > 0){
-          buildChartHistory(); // 기존 스냅샷으로 그래프 재구성
-        }
+        if(snaps.length > 0) buildChartHistory();
       }
     }
   }
