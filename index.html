@@ -837,7 +837,7 @@ function renderSnaps(){
       <td>${fmt(s.totalValue)}</td>
       <td class="col-hide ${diff===null?'':(diff>=0?'up':'dn')}">${diff===null?'—':(diff>=0?'+':'')+fmt(diff)}</td>
       <td class="${pct===null?'':(pct>=0?'up':'dn')}">${pct===null?'—':fmtPct(pct)}</td>
-      <td><button class="del-btn" onclick="deleteSnap('${s.id}')">🗑</button></td>
+      <td><button class="del-btn" onclick="deleteSnap('${s.id||s.timestamp}')">🗑</button></td>
     </tr>`;
   }).join('');
 }
@@ -1852,7 +1852,17 @@ function drawLineChart(){
     Rmin=Math.min(...op)*0.97; Rmax=Math.max(...op)*1.03; Rrng=Rmax-Rmin||1;
   }
 
-  const toX=i=>chartHistory.length>1?gL+(i/(chartHistory.length-1))*gW:gL+gW*0.5;
+  // ── 시간 기반 좌표 변환 (tsToX와 toX 통일) ──
+  const t0=chartHistory[0].ts;
+  const t1=chartHistory[chartHistory.length-1].ts;
+  const tRng=t1-t0||1;
+  // toX: chartHistory 인덱스 → 해당 스냅샷의 실제 시간으로 X 계산
+  const toX=i=>{
+    const ts=chartHistory[Math.min(i,chartHistory.length-1)].ts;
+    return chartHistory.length>1?gL+((ts-t0)/tRng)*gW:gL+gW*0.5;
+  };
+  // tsToX: 임의 타임스탬프 → X (toX와 동일 계산식)
+  const tsToX=ts=>chartHistory.length>1?gL+((ts-t0)/tRng)*gW:gL+gW*0.5;
   const toYL=v=>gT+(1-(Math.max(Lmin,Math.min(Lmax,v))-Lmin)/Lrng)*gH;
   const toYR=v=>gT+(1-(v-Rmin)/Rrng)*gH;
   const TICK=5; // tick 길이
@@ -1963,27 +1973,24 @@ function drawLineChart(){
     line._marker=line.isSum?null:MARKERS[i%MARKERS.length];
   });
 
+  // ── 스냅샷 수직 점선 + 교차 마커 ──
+  // tsToX는 위에서 이미 선언됨 (toX와 동일 계산식으로 통일)
   if(chartHistory.length>1){
-    const t0=chartHistory[0].ts;
-    const t1=chartHistory[chartHistory.length-1].ts;
-    const tRng=t1-t0||1;
-    const tsToX=ts=>gL+((ts-t0)/tRng)*gW;
-
     loadSnaps().forEach(s=>{
       if(s.timestamp<t0||s.timestamp>t1) return;
       const sx=tsToX(s.timestamp);
 
-      // 수직 점선
-      ctx.strokeStyle='rgba(0,122,255,0.18)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
+      // 수직 점선 (박스 안에만)
+      ctx.strokeStyle='rgba(100,100,100,0.2)'; ctx.lineWidth=1; ctx.setLineDash([2,3]);
       ctx.beginPath(); ctx.moveTo(sx,BT+PAD_IN); ctx.lineTo(sx,BT+BH-PAD_IN); ctx.stroke();
       ctx.setLineDash([]);
 
-      // 각 종목 교차점 마커
+      // 수직선 위 교차 마커: 해당 스냅샷 시간의 실제 값 사용
       lines.forEach(line=>{
         if(!line._marker) return;
         const isOut=outLines.includes(line);
         const useY=isOut?toYR:toYL;
-        // 스냅샷 시간에 가장 가까운 chartHistory 인덱스 찾기
+        // 스냅샷 시간에서 실제 값 보간: tsToX와 동일 시간 기준으로 가장 가까운 인덱스
         let nearIdx=0, minDiff=Infinity;
         chartHistory.forEach((h,i)=>{
           const d=Math.abs(h.ts-s.timestamp);
@@ -1991,9 +1998,9 @@ function drawLineChart(){
         });
         const v=line.vals[nearIdx];
         if(v==null) return;
+        // 마커 X는 tsToX(s.timestamp) 사용 (수직선과 동일)
         const my=useY(v);
-        // 그래프 영역 안에 있을 때만
-        if(my<BT||my>BT+BH) return;
+        if(my<BT+PAD_IN||my>BT+BH-PAD_IN) return; // 박스 안에만
         drawMarker(ctx, line._marker, sx, my, 4, line.color);
       });
     });
@@ -2104,18 +2111,18 @@ function drawLineChart(){
       const tw1=ctx.measureText(line1).width;
       ctx.font='8px Pretendard,sans-serif';
       const tw2=ctx.measureText(line2).width;
-      const bw=Math.max(tw1,tw2)+12;
+      const bw=Math.max(tw1,tw2)+14;
       const bh=line2?28:16;
 
-      // 박스 X: 화살표 오른쪽, 화면 넘으면 왼쪽으로
-      let bx=ex+10;
-      if(bx+bw>W-10) bx=ex-bw-10;
+      // 박스 X: 화살표 바로 옆(오른쪽), 외곽 박스 안에 클램프
+      let bx=ex+8;
+      if(bx+bw>BL+BW-4) bx=ex-bw-8; // 오른쪽 넘으면 왼쪽으로
+      bx=Math.max(BL+4, Math.min(BL+BW-bw-4, bx)); // 외곽 박스 안
 
-      // 박스 Y: 매수=화살촉 위, 매도=화살촉 아래 / 화면 경계 클램프
+      // 박스 Y: 매수=화살촉 위, 매도=화살촉 아래, 외곽 박스 안에 클램프
       const arrowTip=isBuy?(ly-2-TAIL):(ly+2+TAIL);
-      let by=isBuy ? arrowTip-bh-4 : arrowTip+4;
-      // 캔버스 위아래 경계 클램프
-      by=Math.max(2, Math.min(H-bh-2, by));
+      let by=isBuy ? arrowTip-bh-2 : arrowTip+4;
+      by=Math.max(BT+4, Math.min(BT+BH-bh-4, by)); // 외곽 박스 안
 
       // 박스 배경
       ctx.fillStyle='rgba(255,255,255,0.95)';
