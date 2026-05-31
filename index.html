@@ -1777,7 +1777,21 @@ function drawLineChart(){
       const prev=pctVals[j-1],curr=pctVals[j];
       if(prev==null||curr==null) continue;
       const jump=curr-prev;
-      if(Math.abs(jump)>=4) events.push({idx:j,type:jump>0?'buy':'sell',jump});
+      if(Math.abs(jump)>=4){
+        // 수량·금액 변화 감지
+        const prevAbs=rawVals[j-1]||0;
+        const currAbs=rawVals[j]||0;
+        const absDiff=currAbs-prevAbs;
+        // 수량 추정: 금액 변화 / 현재가 (KRW 환산)
+        const curPrice=a.currentPrice||a.avgPrice||1;
+        const priceKRW=a.currency==='USD'?curPrice*FX.USD:a.currency==='JPY'?curPrice*FX.JPY:curPrice;
+        const qtyEst=priceKRW>0?Math.round(Math.abs(absDiff)/priceKRW):0;
+        events.push({
+          idx:j, type:jump>0?'buy':'sell', jump,
+          qty:qtyEst||null,
+          amt:Math.abs(absDiff)||null
+        });
+      }
     }
     const lineColor=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
     lines.push({label:a.name,vals:pctVals,absVals:rawVals,color:lineColor,lw:1.0,assetId:a.id,events});
@@ -1799,7 +1813,20 @@ function drawLineChart(){
   const maxN=normalPct.length?Math.max(...normalPct):maxP;
   const pad=(maxN-minN)*0.2||1.5;
   const minV=minN-pad, maxV=maxN+pad, rng=maxV-minV||1;
-  const hasOutlier=minP<lowerFence||maxP>upperFence;
+
+  // 이상치 선 분류
+  const outlierLines=lines.filter(l=>l.vals.some(v=>v!=null&&(v>upperFence||v<lowerFence)));
+  const outlierPcts=outlierLines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
+  const hasOutlier=outlierLines.length>0;
+  // 이상치 Y축 (오른쪽): 이상치 선들의 범위
+  let outMinV=0,outMaxV=0,outRng=1;
+  if(hasOutlier){
+    outMinV=Math.min(...outlierPcts)*0.98;
+    outMaxV=Math.max(...outlierPcts)*1.02;
+    outRng=outMaxV-outMinV||1;
+  }
+  // 이상치 toY (오른쪽 Y축)
+  const toYOut=v=>PAD.t+(1-(v-outMinV)/outRng)*gH;
 
   const toX=i=>chartHistory.length>1?PAD.l+(i/(chartHistory.length-1))*gW:PAD.l+gW*0.5;
   // ① 클리핑 없이 — 이상치는 경계에 고정하되 화살표는 실제 위치로
@@ -1823,17 +1850,17 @@ function drawLineChart(){
   }
 
   // 이상치 물결선 (상단 아주 얇게)
+  // 오른쪽 Y축 레이블 (이상치 종목, 회색)
   if(hasOutlier){
-    const bY=PAD.t-10;
-    ctx.strokeStyle='rgba(150,150,150,.3)';ctx.lineWidth=1;
-    for(let x=PAD.l;x<PAD.l+gW;x+=6){
-      ctx.beginPath();ctx.moveTo(x,bY);ctx.lineTo(x+3,bY-2);ctx.lineTo(x+6,bY);ctx.stroke();
+    ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='left';
+    for(let r=0;r<=4;r++){
+      const y=PAD.t+(r/4)*gH;
+      const val=outMaxV-(r/4)*outRng;
+      ctx.fillText((val>=0?'+':'')+val.toFixed(1)+'%',PAD.l+gW+4,y+4);
     }
-    ctx.fillStyle='rgba(142,142,147,.6)';ctx.font='9px Pretendard,-apple-system,sans-serif';
-    ctx.textAlign='left';ctx.fillText('≈ 이상치 클리핑',PAD.l+2,bY+10);
   }
 
-  // Y축 레이블
+  // Y축 레이블 (왼쪽, 정상 종목)
   ctx.fillStyle='#8e8e93';ctx.font='10px Pretendard,-apple-system,sans-serif';ctx.textAlign='right';
   for(let r=0;r<=4;r++){
     const y=PAD.t+(r/4)*gH;
@@ -1865,49 +1892,83 @@ function drawLineChart(){
 
   // ── 선 그리기 ──
   lines.forEach(line=>{
-    ctx.setLineDash([]); // ⑤ 초기화 보장
-    ctx.strokeStyle=line.color;ctx.lineWidth=line.lw;ctx.lineJoin='round';ctx.lineCap='round';
-    ctx.setLineDash(line.isSum?[5,2]:[3,2]);
+    const isOut=outlierLines.includes(line);
+    const useToY=isOut?toYOut:toY;
+    ctx.setLineDash([2,1]);
+    ctx.strokeStyle=line.color;
+    ctx.lineWidth=line.isSum?1.6:1.0;
+    ctx.lineJoin='round';ctx.lineCap='round';
     ctx.beginPath();
     let started=false;
     line.vals.forEach((v,i)=>{
       if(v==null) return;
-      const cy=toY(v);
+      const cy=useToY(v);
       if(!started){ctx.moveTo(toX(i),cy);started=true;}
       else{ctx.lineTo(toX(i),cy);}
     });
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // ── 매수/매도 화살표 ──
+    // ── 매수/매도 화살표 + 정보 박스 ──
     if(line.events){
       line.events.forEach(ev=>{
         const v=line.vals[ev.idx];
         if(v==null) return;
         const ex=toX(ev.idx);
-        // ① 화살표 위치: 클리핑된 선 위치 기준 (경계 안)
-        const lineY=toY(v);
+        const lineY=useToY(v); // 점선 위치
         const isBuy=ev.type==='buy';
-        const arrowY=isBuy
-          ? Math.max(PAD.t+14, lineY-14) // 상단 경계 안
-          : Math.min(PAD.t+gH-14, lineY+14); // 하단 경계 안
+
+        // 화살표: 점선 바로 아래 바짝 붙임
+        const arrowTop=lineY+1;   // 점선 바로 아래 1px
+        const arrowH=7;
         ctx.fillStyle=line.color;
         ctx.beginPath();
         if(isBuy){
-          ctx.moveTo(ex,arrowY-8);
-          ctx.lineTo(ex-5,arrowY);
-          ctx.lineTo(ex+5,arrowY);
+          // ▼ 아래방향 (매수: 자금 투입)
+          ctx.moveTo(ex-5,arrowTop);
+          ctx.lineTo(ex+5,arrowTop);
+          ctx.lineTo(ex,  arrowTop+arrowH);
         } else {
-          ctx.moveTo(ex,arrowY+8);
-          ctx.lineTo(ex-5,arrowY);
-          ctx.lineTo(ex+5,arrowY);
+          // ▲ 위방향 (매도: 자금 회수)
+          ctx.moveTo(ex-5,arrowTop+arrowH);
+          ctx.lineTo(ex+5,arrowTop+arrowH);
+          ctx.lineTo(ex,  arrowTop);
         }
         ctx.closePath();ctx.fill();
-        // 점프 크기 레이블 (항상 표시)
+
+        // 정보 박스 (화살표 오른쪽)
+        const boxX=ex+10;
+        const boxY=lineY+1;
+        const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
+        const label=isBuy?'매입':'매도';
+        const qtyStr=ev.qty?ev.qty.toLocaleString()+'주':'';
+        const amtStr=ev.amt?sym+(ev.amt/10000).toFixed(0)+'만':'';
+
+        const rows=[label, qtyStr, amtStr].filter(Boolean);
+        const BW=70, LH=11, BH=rows.length*LH+8;
+
+        // 박스 배경
+        ctx.fillStyle='rgba(255,255,255,0.93)';
+        ctx.strokeStyle=line.color;
+        ctx.lineWidth=0.8;
+        ctx.beginPath();
+        const br=3;
+        const bx=Math.min(boxX,W-PAD.r-BW-4);
+        ctx.roundRect(bx,boxY,BW,BH,br);
+        ctx.fill();ctx.stroke();
+
+        // 첫 줄: 매입/매도 (종목 색, 굵게)
         ctx.font='bold 9px Pretendard,-apple-system,sans-serif';
-        ctx.fillStyle=line.color;ctx.textAlign='center';
-        const lbY=isBuy?arrowY-11:arrowY+19;
-        ctx.fillText((ev.jump>=0?'+':'')+ev.jump.toFixed(1)+'%',ex,Math.max(PAD.t+8,Math.min(PAD.t+gH-4,lbY)));
+        ctx.fillStyle=line.color;
+        ctx.textAlign='left';
+        ctx.fillText(rows[0],bx+5,boxY+LH);
+
+        // 나머지 줄: 회색
+        ctx.font='8px Pretendard,-apple-system,sans-serif';
+        ctx.fillStyle='rgba(60,60,60,0.8)';
+        rows.slice(1).forEach((r,i)=>{
+          ctx.fillText(r,bx+5,boxY+(i+2)*LH);
+        });
       });
     }
 
@@ -1916,7 +1977,7 @@ function drawLineChart(){
     if(lastValidIdx===-1) return;
     const lastIdx=line.vals.length-1-lastValidIdx;
     const lastPct=line.vals[lastIdx];
-    const lx=toX(lastIdx), ly=toY(lastPct);
+    const lx=toX(lastIdx), ly=useToY(lastPct);
     ctx.beginPath();ctx.arc(lx,ly,3,0,2*Math.PI);ctx.fillStyle=line.color;ctx.fill();
     ctx.beginPath();ctx.arc(lx,ly,1.5,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
     line._lx=lx;line._ly=ly;line._lastPct=lastPct;
