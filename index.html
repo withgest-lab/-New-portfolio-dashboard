@@ -793,17 +793,17 @@ function saveSnap(){
   saveSnaps(snaps);
   renderSnaps();
 }
-function deleteSnap(id){
-  pendingTrade = {mode:'snap_delete', snapId:id};
+function deleteSnap(snapKey){
+  // snapKey = s.id 또는 String(s.timestamp) (폴백)
   const snaps = loadSnaps();
-  const s = snaps.find(x=>x.id===id);
+  const s = snaps.find(x=>String(x.id||x.timestamp)===String(snapKey));
+  if(!s){ alert('스냅샷을 찾을 수 없습니다.'); return; }
+  pendingTrade = {mode:'snap_delete', snapKey: String(snapKey)};
   const titleEl    = document.getElementById('tc_title');
   const detailEl   = document.getElementById('tc_detail');
   const confirmBtn = document.getElementById('tc_confirm');
   titleEl.innerHTML = `<span style="color:var(--color-up)">🗑 스냅샷 삭제</span>`;
-  detailEl.innerHTML = s
-    ? `${new Date(s.timestamp).toLocaleString('ko-KR')}<br><b>${fmt(s.totalValue)}</b><br><span style="color:var(--color-tertiary);font-size:11px;">이 스냅샷을 삭제할까요?</span>`
-    : '이 스냅샷을 삭제할까요?';
+  detailEl.innerHTML = `${new Date(s.timestamp).toLocaleString('ko-KR')}<br><b>${fmt(s.totalValue)}</b><br><span style="color:var(--color-tertiary);font-size:11px;">이 스냅샷을 삭제할까요?</span>`;
   confirmBtn.style.background = 'var(--color-up)';
   confirmBtn.textContent = '삭제 확인';
   document.getElementById('tradeConfirmModal').classList.add('open');
@@ -1081,13 +1081,9 @@ function executeTrade(){
 
   // 스냅샷 개별 삭제
   if(mode==='snap_delete'){
-    const {snapId} = pendingTrade;
+    const {snapKey} = pendingTrade;
     const before=loadSnaps();
-    const after=before.filter(s=>s.id!==snapId && String(s.timestamp)!==String(snapId));
-    if(after.length===before.length){
-      // id 매칭 실패 시 timestamp 기반으로 한번 더 시도
-      console.warn('snap delete: id match failed, trying timestamp', snapId);
-    }
+    const after=before.filter(s=>String(s.id||s.timestamp)!==String(snapKey));
     saveSnaps(after);
     renderSnaps();
     buildChartHistory();
@@ -2057,9 +2053,40 @@ function drawLineChart(){
     });
   }
 
-  ctx.restore(); // ★ 클리핑 해제 — 이후 그리는 것은 캔버스 전체에 자유롭게
+  ctx.restore(); // ★ 클리핑 해제
 
-  // ── 꼬리 달린 화살표 + 정보 박스 (클리핑 밖 → 절대 잘리지 않음) ──
+  // ── 충돌 감지용 rect 목록 ──
+  const usedRects=[]; // {x,y,w,h}
+  function noCollide(x,y,w,h){
+    return!usedRects.some(r=>x<r.x+r.w&&x+w>r.x&&y<r.y+r.h&&y+h>r.y);
+  }
+  function placeBox(prefX,prefY,w,h,minX,maxX,minY,maxY){
+    // 후보 위치들 순서대로 시도
+    const candidates=[
+      {x:prefX,             y:prefY},             // 1순위: 기본 위치
+      {x:prefX,             y:prefY-h-4},          // 위로
+      {x:prefX,             y:prefY+h+4},          // 아래로
+      {x:prefX-w-12,        y:prefY},              // 왼쪽
+      {x:prefX+w+12,        y:prefY},              // 오른쪽
+      {x:prefX,             y:minY+4},             // 최상단
+      {x:prefX,             y:maxY-h-4},           // 최하단
+    ];
+    for(const c of candidates){
+      const cx=Math.max(minX,Math.min(maxX-w,c.x));
+      const cy=Math.max(minY,Math.min(maxY-h,c.y));
+      if(noCollide(cx,cy,w,h)){
+        usedRects.push({x:cx,y:cy,w,h});
+        return{x:cx,y:cy};
+      }
+    }
+    // 모두 실패 시 기본 위치 (겹쳐도)
+    const fx=Math.max(minX,Math.min(maxX-w,prefX));
+    const fy=Math.max(minY,Math.min(maxY-h,prefY));
+    usedRects.push({x:fx,y:fy,w,h});
+    return{x:fx,y:fy};
+  }
+
+  // ── 꼬리 달린 화살표 + 정보 박스 ──
   lines.forEach(line=>{
     if(!line.events||!line.events.length) return;
     const useY=line._useY||(outLines.includes(line)?toYR:toYL);
@@ -2067,39 +2094,28 @@ function drawLineChart(){
       const v=line.vals[ev.idx]; if(v==null) return;
       const ex=toX(ev.idx), ly=useY(v);
       const isBuy=ev.type==='buy';
+      const TAIL=14, HW=6, HH=8;
 
-      // ── 꼬리 달린 화살표 ──
-      // 매수: 선 위에 ↑ (꼬리=세로선, 머리=삼각형)
-      // 매도: 선 아래에 ↓
-      const TAIL=14; // 꼬리 길이
-      const HW=6;    // 화살촉 너비
-      const HH=8;    // 화살촉 높이
       ctx.strokeStyle=line.color; ctx.fillStyle=line.color;
       ctx.lineWidth=1.5; ctx.setLineDash([]);
 
       if(isBuy){
-        const base=ly-2;         // 꼬리 시작 (선 바로 위)
-        const tipY=base-TAIL;    // 화살촉 끝 (꼭짓점)
-        // 꼬리 세로선
-        ctx.beginPath(); ctx.moveTo(ex,base); ctx.lineTo(ex,tipY+HH); ctx.stroke();
-        // 화살촉 삼각형 (위쪽)
+        // 매수: 머리(꼭짓점)가 종목선 바로 아래, 꼬리는 위로
+        const headTip=ly+3;
+        ctx.beginPath(); ctx.moveTo(ex,headTip-HH); ctx.lineTo(ex,headTip-HH-TAIL+HH); ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(ex,      tipY);
-        ctx.lineTo(ex-HW,   tipY+HH);
-        ctx.lineTo(ex+HW,   tipY+HH);
+        ctx.moveTo(ex,headTip); ctx.lineTo(ex-HW,headTip-HH); ctx.lineTo(ex+HW,headTip-HH);
         ctx.closePath(); ctx.fill();
       } else {
-        const base=ly+2;
-        const tipY=base+TAIL;
-        ctx.beginPath(); ctx.moveTo(ex,base); ctx.lineTo(ex,tipY-HH); ctx.stroke();
+        // 매도: 머리(꼭짓점)가 종목선 바로 위, 꼬리는 아래로
+        const headTip=ly-3;
+        ctx.beginPath(); ctx.moveTo(ex,headTip+HH); ctx.lineTo(ex,headTip+HH+TAIL-HH); ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(ex,      tipY);
-        ctx.lineTo(ex-HW,   tipY-HH);
-        ctx.lineTo(ex+HW,   tipY-HH);
+        ctx.moveTo(ex,headTip); ctx.lineTo(ex-HW,headTip+HH); ctx.lineTo(ex+HW,headTip+HH);
         ctx.closePath(); ctx.fill();
       }
 
-      // ── 정보 텍스트 (화살표 오른쪽에 배치) ──
+      // 정보 박스
       const sym=line.assetId?CUR_SYM[assets.find(a=>a.id===line.assetId)?.currency||'KRW']:'₩';
       const typeStr=isBuy?'매입':'매도';
       const qStr=ev.qty?ev.qty.toLocaleString()+'주':'';
@@ -2111,46 +2127,43 @@ function drawLineChart(){
       const tw1=ctx.measureText(line1).width;
       ctx.font='8px Pretendard,sans-serif';
       const tw2=ctx.measureText(line2).width;
-      const bw=Math.max(tw1,tw2)+14;
-      const bh=line2?28:16;
+      const bw=Math.max(tw1,tw2)+14, bh=line2?28:16;
 
-      // 박스 X: 화살표 바로 옆(오른쪽), 외곽 박스 안에 클램프
-      let bx=ex+8;
-      if(bx+bw>BL+BW-4) bx=ex-bw-8; // 오른쪽 넘으면 왼쪽으로
-      bx=Math.max(BL+4, Math.min(BL+BW-bw-4, bx)); // 외곽 박스 안
+      // 기본 위치: 화살표 오른쪽
+      const prefX=ex+10;
+      const prefY=isBuy ? ly-TAIL-bh-4 : ly+TAIL+4;
 
-      // 박스 Y: 매수=화살촉 위, 매도=화살촉 아래, 외곽 박스 안에 클램프
-      const arrowTip=isBuy?(ly-2-TAIL):(ly+2+TAIL);
-      let by=isBuy ? arrowTip-bh-2 : arrowTip+4;
-      by=Math.max(BT+4, Math.min(BT+BH-bh-4, by)); // 외곽 박스 안
+      // 충돌 감지로 위치 결정 (외곽 박스 안에 클램프)
+      const pos=placeBox(prefX,prefY,bw,bh,BL+4,BL+BW-4,BT+2,BT+BH-2);
 
-      // 박스 배경
-      ctx.fillStyle='rgba(255,255,255,0.95)';
-      ctx.strokeStyle=line.color+'88'; ctx.lineWidth=0.8;
-      ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,3); ctx.fill(); ctx.stroke();
-
+      // 박스
+      ctx.fillStyle='rgba(255,255,255,0.96)';
+      ctx.strokeStyle=line.color+'99'; ctx.lineWidth=0.8;
+      ctx.beginPath(); ctx.roundRect(pos.x,pos.y,bw,bh,3); ctx.fill(); ctx.stroke();
       // 텍스트
-      ctx.fillStyle=line.color;
-      ctx.font='bold 8px Pretendard,sans-serif';
-      ctx.textAlign='left';
-      ctx.fillText(line1, bx+6, by+11);
+      ctx.fillStyle=line.color; ctx.font='bold 8px Pretendard,sans-serif'; ctx.textAlign='left';
+      ctx.fillText(line1,pos.x+6,pos.y+11);
       if(line2){
-        ctx.fillStyle='#666';
-        ctx.font='8px Pretendard,sans-serif';
-        ctx.fillText(line2, bx+6, by+22);
+        ctx.fillStyle='#666'; ctx.font='8px Pretendard,sans-serif';
+        ctx.fillText(line2,pos.x+6,pos.y+22);
       }
     });
   });
 
-  // ── X축 ──
+  // ── X축 날짜 (겹침 방지) ──
   ctx.font='10px Pretendard,sans-serif'; ctx.fillStyle='#8e8e93';
   const xT=Math.max(2,Math.min(MAX_XT,chartHistory.length));
+  const xPositions=[];
   for(let i=0;i<xT;i++){
     const idx=xT>1?Math.round(i/(xT-1)*(chartHistory.length-1)):0;
+    const x=toX(idx);
+    // 이전 날짜와 너무 가까우면 건너뜀 (겹침 방지)
+    const lastX=xPositions[xPositions.length-1]||null;
+    if(lastX!==null&&x-lastX<50) continue;
+    xPositions.push(x);
     const d=new Date(chartHistory[Math.min(idx,chartHistory.length-1)].ts);
     const mo=d.getMonth()+1,dd=d.getDate();
     const hh=String(d.getHours()).padStart(2,'0'),mm=String(d.getMinutes()).padStart(2,'0');
-    const x=toX(idx);
     ctx.textAlign=i===0?'left':(i===xT-1?'right':'center');
     if(['1D','1W','1M'].includes(currentPeriod)){
       ctx.fillText(mo+'/'+dd,x,BT+BH+15);
@@ -2427,7 +2440,9 @@ window.addEventListener('resize',()=>drawLineChart());
       const all=loadSnaps();
       if(cleaned.length!==all.length){saveSnaps(cleaned);renderSnaps();}
     }
-    if(currentPeriod==='1D') buildChartHistory();
+    buildChartHistory(); // 시세 갱신 후 항상 그래프 재빌드
+  }).catch(()=>{
+    buildChartHistory(); // 실패해도 기존 데이터로 그래프 표시
   });
   setStatus('ok','초기 데이터 로드 완료 — 🔄 버튼으로 최신 시세 갱신');
 })();
