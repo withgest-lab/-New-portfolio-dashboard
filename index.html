@@ -680,7 +680,27 @@ async function yahooFetch(url){
   return null;
 }
 
-// ── 한국 주식 장 상태 (시간 기반) ──
+// ── 미국 장 상태 (시간 기반 폴백) ──
+// Apps Script 미배포 등 marketState 없을 때 사용
+function getUSMarketStateByTime(){
+  const now=new Date();
+  const day=now.getDay();
+  if(day===0||day===6) return 'CLOSED';
+  const dst=isUSDST();
+  const min=now.getHours()*60+now.getMinutes();
+  if(dst){
+    // 서머타임: 프리 21:00~22:30, 정규 22:30~05:00, 애프터 05:00~09:00
+    if(min>=21*60   && min<22*60+30) return 'PRE';
+    if(min>=22*60+30|| min<5*60)     return 'REGULAR';
+    if(min>=5*60    && min<9*60)     return 'POST';
+  } else {
+    // 비서머타임: 프리 22:00~23:30, 정규 23:30~06:00, 애프터 06:00~10:00
+    if(min>=22*60   && min<23*60+30) return 'PRE';
+    if(min>=23*60+30|| min<6*60)     return 'REGULAR';
+    if(min>=6*60    && min<10*60)    return 'POST';
+  }
+  return 'CLOSED';
+}
 // 프리장:  08:00~09:00
 // 정규장:  09:00~15:30
 // 애프터장: 15:30~18:00
@@ -1093,7 +1113,7 @@ function renderTable(){
     }
 
     // ── 현재가 셀 + 전일比 셀 ──
-    const ms = a.marketState || 'REGULAR';
+    const ms = a.marketState || (a.currency==='USD' ? getUSMarketStateByTime() : 'REGULAR');
     const prePrice  = a.prePrice  || null;
     const postPrice = a.postPrice || null;
     const regPrice  = a.regularPrice || a.currentPrice;
@@ -2322,7 +2342,7 @@ function drawLineChart(){
     // tick 선 (박스 왼쪽 벽에서 왼쪽으로)
     ctx.beginPath(); ctx.moveTo(BL,y); ctx.lineTo(BL-TICK,y); ctx.stroke();
     ctx.textAlign='right';
-    ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', BL-TICK-3, y+4);
+    ctx.fillText((v>=0?'+':'')+v.toFixed(2)+'%', BL-TICK-3, y+4);
   }
 
   // ── 오른쪽 Y축 숫자 + tick (박스 밖 오른쪽) ──
@@ -2333,7 +2353,7 @@ function drawLineChart(){
       const v=Rmax-(r/4)*Rrng;
       ctx.beginPath(); ctx.moveTo(BL+BW,y); ctx.lineTo(BL+BW+TICK,y); ctx.stroke();
       ctx.textAlign='left';
-      ctx.fillText((v>=0?'+':'')+v.toFixed(1)+'%', BL+BW+TICK+3, y+4);
+      ctx.fillText((v>=0?'+':'')+v.toFixed(2)+'%', BL+BW+TICK+3, y+4);
     }
   } else {
     // 이상치 없어도 오른쪽 tick만 표시 (대칭)
@@ -2491,11 +2511,11 @@ function drawLineChart(){
     ctx.font=`bold ${LBL_FONT}px Pretendard,sans-serif`; ctx.textAlign='left';
     labeled.forEach(l=>{
       const aly=Math.max(gT+4,Math.min(gT+gH-2,l._aly));
-      const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(1)+'%';
+      const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(2)+'%';
 
       // 장 구분 레이블
       const a=assets.find(x=>x.id===l.assetId);
-      const ms=a?.marketState;
+      const ms=a?.marketState||(a?.currency==='USD'?getUSMarketStateByTime():'REGULAR');
       const isKR=a?isKoreanTicker(a.ticker)||a.currency==='KRW':false;
       let statePrefix='', stateColor=l.color;
       if(!isKR && ms){
