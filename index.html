@@ -710,15 +710,29 @@ async function fetchNaver(ticker){
           ? parseInt(String(json.closePrice).replace(/,/g,''))
           : json?.nv
           ? parseInt(String(json.nv).replace(/,/g,''))
-          : 0;
-        const prev = json?.stockEndPrice
-          ? parseInt(String(json.stockEndPrice).replace(/,/g,''))
-          : json?.ov
-          ? parseInt(String(json.ov).replace(/,/g,''))
+          : json?.stockItemTotal?.closePrice
+          ? parseInt(String(json.stockItemTotal.closePrice).replace(/,/g,''))
           : 0;
 
+        // 전일 종가: 여러 필드명 시도
+        // compareToPreviousClosePrice = 전일比 변동액
+        // stockEndPrice / ov = 전일 종가 직접
+        let prev = 0;
+        if(json?.stockEndPrice)
+          prev = parseInt(String(json.stockEndPrice).replace(/,/g,''));
+        else if(json?.ov)
+          prev = parseInt(String(json.ov).replace(/,/g,''));
+        else if(json?.compareToPreviousClosePrice && price>0){
+          // 전일比 변동액으로 역산
+          const chg = parseFloat(String(json.compareToPreviousClosePrice).replace(/,/g,''));
+          prev = price - chg;
+        } else if(json?.stockItemTotal?.compareToPreviousClosePrice && price>0){
+          const chg = parseFloat(String(json.stockItemTotal.compareToPreviousClosePrice).replace(/,/g,''));
+          prev = price - chg;
+        }
+
         if(price>0){
-          return{ok:true, price, prev:prev||price};
+          return{ok:true, price, prev:prev>0?prev:price};
         }
       }catch(e){continue;}
     }
@@ -738,13 +752,36 @@ async function fetchYahoo(ticker){
   return{ok:false};
 }
 
-// 종목 시세 조회: 한국 주식은 네이버 우선, 실패 시 야후 폴백
+// Apps Script 경유 시세 조회 (미국/일본 주식용)
+// 구글 서버에서 야후 직접 호출 → CORS/차단 없음
+async function fetchPriceViaAppsScript(tickers){
+  const cfg = loadGSyncConfig();
+  if(!cfg.url||!cfg.key) return {};
+  try{
+    const params = new URLSearchParams({
+      action: 'price',
+      key:    cfg.key,
+      tickers: tickers.join(','),
+    });
+    const res = await fetch(`${cfg.url}?${params}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if(!res.ok) return {};
+    const json = await res.json();
+    return json.ok ? (json.prices||{}) : {};
+  }catch(e){
+    console.warn('Apps Script 시세 조회 실패:', e);
+    return {};
+  }
+}
+
+// 종목 시세 조회:
+// 한국(.KS/6자리) → 네이버 우선 → 야후 폴백
+// 미국/일본       → Apps Script(구글서버) 우선 → 야후 프록시 폴백
 async function fetchPrice(ticker){
   if(isKoreanTicker(ticker)){
     const r = await fetchNaver(ticker);
     if(r.ok) return r;
-    // 네이버 실패 시 야후로 폴백
-    // 순수 숫자 코드면 .KS 붙여서 야후 시도
     const yahooTicker = /^\d{6}$/.test(ticker.trim()) ? ticker.trim()+'.KS' : ticker;
     return fetchYahoo(yahooTicker);
   }
@@ -781,13 +818,43 @@ async function fetchAllPrices(saveSnapshot=false){
     saveFX();
 
     const targets=assets.filter(a=>a.ticker&&a.ticker!=='—'&&a.category!=='cash');
-    const results=await Promise.allSettled(targets.map(async a=>({id:a.id,name:a.name,r:await fetchPrice(a.ticker)})));
+
+    // 한국 주식 / 해외 주식 분리
+    const krTargets      = targets.filter(a=>isKoreanTicker(a.ticker));
+    const foreignTargets = targets.filter(a=>!isKoreanTicker(a.ticker));
+
+    // 해외 주식: Apps Script 배치 조회 우선
+    let appsScriptPrices = {};
+    if(foreignTargets.length>0){
+      appsScriptPrices = await fetchPriceViaAppsScript(foreignTargets.map(a=>a.ticker));
+    }
+
+    // 전체 병렬 조회
+    const results=await Promise.allSettled(targets.map(async a=>{
+      // 해외 주식이고 Apps Script 결과가 있으면 사용
+      if(!isKoreanTicker(a.ticker) && appsScriptPrices[a.ticker]?.ok){
+        return {id:a.id, name:a.name, r:appsScriptPrices[a.ticker]};
+      }
+      return {id:a.id, name:a.name, r:await fetchPrice(a.ticker)};
+    }));
     let ok=0,fail=0;
     const failNames=[];
     results.forEach(p=>{
       if(p.status==='fulfilled'&&p.value.r.ok){
         const a=assets.find(x=>x.id===p.value.id);
-        if(a){a.prevPrice=p.value.r.prev;a.currentPrice=p.value.r.price;ok++;}
+        if(a){
+          // prev가 price와 같으면 (전일 데이터 없음) 기존 prevPrice 유지
+          const newPrice = p.value.r.price;
+          const newPrev  = p.value.r.prev;
+          a.currentPrice = newPrice;
+          if(newPrev && newPrev !== newPrice){
+            a.prevPrice = newPrev; // 전일 데이터 정상
+          } else if(!a.prevPrice || a.prevPrice===0){
+            a.prevPrice = newPrice; // 초기값
+          }
+          // else: 기존 prevPrice 유지 (전일 데이터 없음)
+          ok++;
+        }
       }else{
         fail++;
         if(p.status==='fulfilled') failNames.push(p.value.name);
