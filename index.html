@@ -511,14 +511,7 @@ const GSYNC_KEY   = 'pf_gsync_v1'; // Google Sheets 설정 저장
    Google Sheets 동기화
 ════════════════════════════════════════ */
 function loadGSyncConfig(){
-  const DEFAULT_CFG = {
-    url: 'https://script.google.com/macros/s/AKfycbxMiMYqwWaHCTGFlW-wn8RbIPxDb547uoUk1hUV2DOUgX-K6N1HMFr49zKaxZAWZfLh/exec',
-    key: 'mnjw32$'
-  };
-  try{
-    const saved = JSON.parse(localStorage.getItem(GSYNC_KEY)||'{}');
-    return (saved.url && saved.key) ? saved : DEFAULT_CFG;
-  }catch(e){ return DEFAULT_CFG; }
+  try{ return JSON.parse(localStorage.getItem(GSYNC_KEY)||'{}'); }catch(e){ return {}; }
 }
 function saveGSyncConfig(cfg){
   localStorage.setItem(GSYNC_KEY, JSON.stringify(cfg));
@@ -688,48 +681,9 @@ async function yahooFetch(url){
 }
 
 // ── 미국 장 상태 (시간 기반 폴백) ──
-// Apps Script 미배포 등 marketState 없을 때 사용
-function getUSMarketStateByTime(){
-  const now=new Date();
-  const day=now.getDay();
-  if(day===0||day===6) return 'CLOSED';
-  const dst=isUSDST();
-  const min=now.getHours()*60+now.getMinutes();
-  if(dst){
-    // 서머타임: 프리 21:00~22:30, 정규 22:30~05:00, 애프터 05:00~09:00
-    if(min>=21*60   && min<22*60+30) return 'PRE';
-    if(min>=22*60+30|| min<5*60)     return 'REGULAR';
-    if(min>=5*60    && min<9*60)     return 'POST';
-  } else {
-    // 비서머타임: 프리 22:00~23:30, 정규 23:30~06:00, 애프터 06:00~10:00
-    if(min>=22*60   && min<23*60+30) return 'PRE';
-    if(min>=23*60+30|| min<6*60)     return 'REGULAR';
-    if(min>=6*60    && min<10*60)    return 'POST';
-  }
-  return 'CLOSED';
-}
-// 프리장:  08:00~09:00
-// 정규장:  09:00~15:30
-// 애프터장: 15:30~18:00
-// 종료:    그 외
-function getKRMarketState(){
-  const now=new Date();
-  const day=now.getDay();
-  if(day===0||day===6) return 'CLOSED';
-  const min=now.getHours()*60+now.getMinutes();
-  if(min>=8*60   && min<9*60)    return 'PRE';
-  if(min>=9*60   && min<15*60+30) return 'REGULAR';
-  if(min>=15*60+30 && min<18*60) return 'POST';
-  return 'CLOSED';
-}
-
-// ── 미국 주식 장 상태 레이블 ──
-function getUSMarketLabel(ms){
-  if(ms==='PRE')     return {label:'프리',   color:'#ff9500'};
-  if(ms==='POST')    return {label:'애프터', color:'#5856d6'};
-  if(ms==='REGULAR') return {label:'정규',   color:'#007aff'};
-  return {label:'정규', color:'#8e8e93'}; // CLOSED도 정규(마지막값) 표시
-}
+function getUSMarketStateByTime(){ return 'REGULAR'; }
+function getKRMarketState(){ return 'REGULAR'; }
+function getUSMarketLabel(ms){ return {label:'', color:'#007aff'}; }
 // ticker가 .KS/.KQ/.KN 이거나 순수 6자리 숫자인 경우 사용
 function isKoreanTicker(ticker){
   return /\.(KS|KQ|KN)$/i.test(ticker) || /^\d{6}$/.test(ticker.trim());
@@ -781,16 +735,7 @@ async function fetchNaver(ticker){
         }
 
         if(price>0){
-          // 야후에서 pre/postMarketPrice 추가 조회
-          const yTicker=/\.(KS|KQ)$/i.test(ticker)?ticker:ticker.trim()+'.KS';
-          let prePrice=null, postPrice=null;
-          try{
-            const yJson=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yTicker)}?interval=1d&range=1d`);
-            const yMeta=yJson?.chart?.result?.[0]?.meta;
-            if(yMeta){ prePrice=yMeta.preMarketPrice||null; postPrice=yMeta.postMarketPrice||null; }
-          }catch(e){}
-          return{ok:true, price, prev:prev>0?prev:price,
-            regularPrice:price, prePrice, postPrice, marketState:getKRMarketState()};
+          return{ok:true, price, prev:prev>0?prev:price, regularPrice:price};
         }
       }catch(e){continue;}
     }
@@ -804,16 +749,9 @@ async function fetchYahoo(ticker){
     const json = await yahooFetch(url);
     const meta = json?.chart?.result?.[0]?.meta;
     if(meta&&meta.regularMarketPrice>0){
-      const ms          = meta.marketState||'REGULAR';
       const regularPrice= meta.regularMarketPrice;
-      const prePrice    = meta.preMarketPrice  ||null;
-      const postPrice   = meta.postMarketPrice ||null;
       const prev        = meta.chartPreviousClose||meta.previousClose||regularPrice;
-      // 현재 표시 가격: 프리/애프터장이면 해당 가격
-      const price = (ms==='PRE'&&prePrice)  ? prePrice
-                  : (ms==='POST'&&postPrice) ? postPrice
-                  : regularPrice;
-      return{ok:true, price, prev, regularPrice, prePrice, postPrice, marketState:ms};
+      return{ok:true, price:regularPrice, prev, regularPrice, marketState:'REGULAR'};
     }
   }
   return{ok:false};
@@ -928,11 +866,8 @@ async function fetchAllPrices(saveSnapshot=false){
           } else if(!a.prevPrice || a.prevPrice===0){
             a.prevPrice = newPrice;
           }
-          // 장 구분 + 프리/애프터/정규 가격 저장
-          if(p.value.r.marketState)   a.marketState   = p.value.r.marketState;
+          // 정규장 가격만 저장
           if(p.value.r.regularPrice)  a.regularPrice  = p.value.r.regularPrice;
-          if(p.value.r.prePrice)      a.prePrice      = p.value.r.prePrice;
-          if(p.value.r.postPrice)     a.postPrice     = p.value.r.postPrice;
           ok++;
         }
       }else{
@@ -1132,9 +1067,7 @@ function renderTable(){
     }
 
     // ── 현재가 셀 + 전일比 셀 ──
-    const ms = a.marketState || (a.currency==='USD' ? getUSMarketStateByTime() : 'REGULAR');
-    const prePrice  = a.prePrice  || null;
-    const postPrice = a.postPrice || null;
+    const ms = 'REGULAR';
     const regPrice  = a.regularPrice || a.currentPrice;
     const isUS = a.currency==='USD';
 
@@ -1151,18 +1084,9 @@ function renderTable(){
       const regChg = a.prevPrice>0?((regPrice-a.prevPrice)/a.prevPrice)*100:0;
 
       if(isUS){
-        // 미국 주식: 프리/애프터 표기
-        const {label:msLbl, color:msClr} = getUSMarketLabel(ms);
-        priceDisplay = `<span style="font-size:9px;color:${msClr};font-weight:600;">${msLbl}</span> ${priceStr(regPrice)}`;
+        // 미국 주식: 정규장 가격만 표시
+        priceDisplay = priceStr(regPrice);
         dayChgCell   = `<span class="${updn(regChg)}">${fmtPct(regChg)}</span>`;
-        const extraPrice = ms==='PRE'?prePrice : ms==='POST'?postPrice : null;
-        if(extraPrice && extraPrice!==regPrice){
-          const extraLbl = ms==='PRE'?'프리':'애프터';
-          const extraClr = ms==='PRE'?'#ff9500':'#5856d6';
-          const extraChg = a.prevPrice>0?((extraPrice-a.prevPrice)/a.prevPrice)*100:0;
-          priceDisplay += `<br><span style="font-size:9px;color:${extraClr};font-weight:600;">${extraLbl}</span> ${priceStr(extraPrice)}`;
-          dayChgCell   += `<br><span class="${updn(extraChg)}" style="font-size:10px;color:${extraClr};">${fmtPct(extraChg)}</span>`;
-        }
       } else {
         // 한국/일본: 단순 표시
         priceDisplay = priceStr(regPrice);
@@ -2532,22 +2456,12 @@ function drawLineChart(){
       const aly=Math.max(gT+4,Math.min(gT+gH-2,l._aly));
       const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(2)+'%';
 
-      // 장 구분 레이블
-      const a=assets.find(x=>x.id===l.assetId);
-      const ms=a?.marketState||(a?.currency==='USD'?getUSMarketStateByTime():'REGULAR');
-      const isKR=a?isKoreanTicker(a.ticker)||a.currency==='KRW':false;
-      let statePrefix='', stateColor=l.color;
-      if(!isKR && ms){
-        const {label,color}=getUSMarketLabel(ms);
-        statePrefix=label+' ';
-        stateColor=color;
-      }
-
-      const txt=statePrefix+l.label+' '+pctStr;
+      // 장 구분 레이블 제거 - 정규장만 표시
+      const txt=l.label+' '+pctStr;
 
       // 긴 종목명 줄바꿈 처리
       const maxLblW = RLABEL - 6;
-      const fullTxt = statePrefix ? l.label+' '+pctStr : txt;
+      const fullTxt = txt;
       const txtW = ctx.measureText(fullTxt).width;
 
       if(Math.abs(aly-l._ly)>3){
@@ -2557,30 +2471,11 @@ function drawLineChart(){
       }
 
       if(txtW <= maxLblW){
-        // 한 줄 표시
-        if(statePrefix){
-          ctx.fillStyle=stateColor;
-          ctx.fillText(statePrefix, LBL_X, aly+3);
-          const pw=ctx.measureText(statePrefix).width;
-          ctx.fillStyle=l.color;
-          ctx.fillText(l.label+' '+pctStr, LBL_X+pw, aly+3);
-        } else {
-          ctx.fillStyle=l.color;
-          ctx.fillText(txt, LBL_X, aly+3);
-        }
-      } else {
-        // 두 줄: 첫 줄=장구분+종목명, 둘째 줄=%
-        if(statePrefix){
-          ctx.fillStyle=stateColor;
-          ctx.fillText(statePrefix, LBL_X, aly-2);
-          const pw=ctx.measureText(statePrefix).width;
-          ctx.fillStyle=l.color;
-          ctx.fillText(l.label, LBL_X+pw, aly-2);
-        } else {
-          ctx.fillStyle=l.color;
-          ctx.fillText(l.label, LBL_X, aly-2);
-        }
         ctx.fillStyle=l.color;
+        ctx.fillText(txt, LBL_X, aly+3);
+      } else {
+        ctx.fillStyle=l.color;
+        ctx.fillText(l.label, LBL_X, aly-2);
         ctx.fillText(pctStr, LBL_X, aly+8);
       }
     });
