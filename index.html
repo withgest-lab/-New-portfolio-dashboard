@@ -987,55 +987,100 @@ function renderTable(){
       </tr>`;
     }
 
-    // 편집 패널 (✏️ 버튼) - 수량/평균단가 직접 수정
+    // 편집 패널 (✏️ 버튼)
     if(editingId===a.id){
-      rows+=`<tr style="background:#f0fff4;">
-        <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
-          <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
-            ✏️ 종목 수정
-            <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
-              ${a.name} · 수량, 평균단가, 구분을 수정합니다
-            </span>
-          </div>
-          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
-              수량
-              <input id="tp_qty_${a.id}" type="number" value="${a.quantity}"
-                style="width:90px;border:1px solid #34c75960;border-radius:8px;
-                       padding:6px 10px;font-size:13px;font-family:inherit;">
-            </label>
-            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
-              평균단가 (${a.currency})
-              <input id="tp_price_${a.id}" type="number" value="${a.avgPrice}"
-                style="width:110px;border:1px solid #34c75960;border-radius:8px;
-                       padding:6px 10px;font-size:13px;font-family:inherit;">
-            </label>
-            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
-              구분
-              <select id="tp_cat_${a.id}"
-                style="border:1px solid #34c75960;border-radius:8px;padding:6px 10px;
-                       font-size:13px;font-family:inherit;background:var(--color-card);color:var(--color-text);">
-                <option value="stock_kr"  ${a.category==='stock_kr' ?'selected':''}>국내주식</option>
-                <option value="stock_us"  ${a.category==='stock_us' ?'selected':''}>미국주식</option>
-                <option value="stock_jp"  ${a.category==='stock_jp' ?'selected':''}>일본주식</option>
-                <option value="pension_personal"   ${a.category==='pension_personal'  ?'selected':''}>개인연금</option>
-                <option value="pension_retirement" ${a.category==='pension_retirement'?'selected':''}>퇴직연금</option>
-                <option value="irp"       ${a.category==='irp'      ?'selected':''}>IRP 개인</option>
-                <option value="isa"       ${a.category==='isa'      ?'selected':''}>ISA</option>
-                <option value="crypto"    ${a.category==='crypto'   ?'selected':''}>가상자산</option>
-                <option value="cash"      ${a.category==='cash'     ?'selected':''}>현금</option>
-              </select>
-            </label>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      if(a.category==='cash'){
+        // ── 현금 전용: 잔액설정 / 입금 / 출금 ──
+        const sym=CUR_SYM[a.currency];
+        rows+=`<tr style="background:#f0fff4;">
+          <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
+            <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
+              ✏️ 현금 수정
+              <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
+                ${a.name} · 현재 ${sym}${a.avgPrice.toLocaleString()}
+              </span>
+            </div>
+            <!-- 모드 버튼 -->
+            <div style="display:flex;gap:6px;margin-bottom:10px;max-width:320px;">
+              <button id="ep_mode_set_${a.id}" onclick="setEditCashMode('${a.id}','set')"
+                style="flex:1;padding:6px 4px;font-size:12px;border-radius:8px;
+                       border:1.5px solid #34c759;background:#34c75920;
+                       color:#34c759;font-weight:700;cursor:pointer;">잔액 설정</button>
+              <button id="ep_mode_in_${a.id}" onclick="setEditCashMode('${a.id}','in')"
+                style="flex:1;padding:6px 4px;font-size:12px;border-radius:8px;
+                       border:1.5px solid var(--color-border);background:var(--color-section-bg);
+                       color:var(--color-tertiary);cursor:pointer;">+ 입금</button>
+              <button id="ep_mode_out_${a.id}" onclick="setEditCashMode('${a.id}','out')"
+                style="flex:1;padding:6px 4px;font-size:12px;border-radius:8px;
+                       border:1.5px solid var(--color-border);background:var(--color-section-bg);
+                       color:var(--color-tertiary);cursor:pointer;">− 출금</button>
+            </div>
+            <!-- 금액 입력 -->
+            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+              <label id="ep_amt_label_${a.id}" style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+                잔액
+                <input id="ep_cash_amt_${a.id}" type="number" placeholder="0" min="0"
+                  style="width:150px;border:1px solid #34c75960;border-radius:8px;
+                         padding:6px 10px;font-size:13px;font-family:inherit;">
+              </label>
               <button class="btn"
-                style="background:#34c759;color:#fff;padding:7px 16px;font-size:13px;box-shadow:0 2px 8px #34c75930;"
-                onclick="confirmSaveEdit('${a.id}')">✓ 수정저장</button>
+                style="background:#34c759;color:#fff;padding:7px 16px;font-size:13px;"
+                onclick="confirmEditCash('${a.id}')">✓ 수정저장</button>
               <button class="btn btn-ghost" style="padding:7px 12px;font-size:13px;"
                 onclick="closeTradePanel()">✕ 닫기</button>
             </div>
-          </div>
-        </td>
-      </tr>`;
+          </td>
+        </tr>`;
+      } else {
+        // ── 일반 종목: 수량 / 평균단가 / 구분 ──
+        rows+=`<tr style="background:#f0fff4;">
+          <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
+            <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
+              ✏️ 종목 수정
+              <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
+                ${a.name} · 수량, 평균단가, 구분을 수정합니다
+              </span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+              <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+                수량
+                <input id="tp_qty_${a.id}" type="number" value="${a.quantity}"
+                  style="width:90px;border:1px solid #34c75960;border-radius:8px;
+                         padding:6px 10px;font-size:13px;font-family:inherit;">
+              </label>
+              <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+                평균단가 (${a.currency})
+                <input id="tp_price_${a.id}" type="number" value="${a.avgPrice}"
+                  style="width:110px;border:1px solid #34c75960;border-radius:8px;
+                         padding:6px 10px;font-size:13px;font-family:inherit;">
+              </label>
+              <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+                구분
+                <select id="tp_cat_${a.id}"
+                  style="border:1px solid #34c75960;border-radius:8px;padding:6px 10px;
+                         font-size:13px;font-family:inherit;background:var(--color-card);color:var(--color-text);">
+                  <option value="stock_kr"  ${a.category==='stock_kr' ?'selected':''}>국내주식</option>
+                  <option value="stock_us"  ${a.category==='stock_us' ?'selected':''}>미국주식</option>
+                  <option value="stock_jp"  ${a.category==='stock_jp' ?'selected':''}>일본주식</option>
+                  <option value="pension_personal"   ${a.category==='pension_personal'  ?'selected':''}>개인연금</option>
+                  <option value="pension_retirement" ${a.category==='pension_retirement'?'selected':''}>퇴직연금</option>
+                  <option value="irp"       ${a.category==='irp'      ?'selected':''}>IRP 개인</option>
+                  <option value="isa"       ${a.category==='isa'      ?'selected':''}>ISA</option>
+                  <option value="crypto"    ${a.category==='crypto'   ?'selected':''}>가상자산</option>
+                  <option value="cash"      ${a.category==='cash'     ?'selected':''}>현금</option>
+                </select>
+              </label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="btn"
+                  style="background:#34c759;color:#fff;padding:7px 16px;font-size:13px;box-shadow:0 2px 8px #34c75930;"
+                  onclick="confirmSaveEdit('${a.id}')">✓ 수정저장</button>
+                <button class="btn btn-ghost" style="padding:7px 12px;font-size:13px;"
+                  onclick="closeTradePanel()">✕ 닫기</button>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+      }
     }
     return rows;
   }).join('');
@@ -1164,6 +1209,15 @@ function executeTrade(){
   // 삭제
   if(mode==='delete'){
     assets = assets.filter(x=>x.id!==id);
+    saveAssets();renderAll();syncToSheets(true);
+    return;
+  }
+
+  // 현금 잔액 수정 (연필 버튼)
+  if(mode==='edit_cash'){
+    const a=assets.find(x=>x.id===id); if(!a) return;
+    a.avgPrice=trade.newAmt; a.currentPrice=trade.newAmt; a.prevPrice=trade.newAmt;
+    editingId=null;
     saveAssets();renderAll();syncToSheets(true);
     return;
   }
@@ -1522,7 +1576,56 @@ function sellAsset(){
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
-let cashMode = 'set'; // 'set' | 'in' | 'out'
+// 현금 편집 패널 모드 (editingId 기반)
+const editCashModes = {};
+function setEditCashMode(id, mode){
+  editCashModes[id] = mode;
+  const colors = {set:'#34c759', in:'#007aff', out:'#ff3b30'};
+  const labels = {set:'잔액', in:'입금 금액', out:'출금 금액'};
+  ['set','in','out'].forEach(k=>{
+    const btn=document.getElementById(`ep_mode_${k}_${id}`);
+    if(!btn) return;
+    const active=k===mode;
+    btn.style.background  = active ? colors[k]+'20' : 'var(--color-section-bg)';
+    btn.style.borderColor = active ? colors[k]       : 'var(--color-border)';
+    btn.style.color       = active ? colors[k]       : 'var(--color-tertiary)';
+    btn.style.fontWeight  = active ? '700' : '400';
+  });
+  const lbl=document.getElementById(`ep_amt_label_${id}`);
+  if(lbl) lbl.childNodes[0].textContent = labels[mode];
+}
+
+function confirmEditCash(id){
+  const a=assets.find(x=>x.id===id); if(!a) return;
+  const mode=editCashModes[id]||'set';
+  const amt=parseFloat(document.getElementById(`ep_cash_amt_${id}`)?.value);
+  const st=document.getElementById('formStatus');
+  if(isNaN(amt)||amt<0){ if(st) st.textContent='❌ 금액을 입력해 주세요.'; return; }
+  const sym=CUR_SYM[a.currency];
+  let newAmt, changeStr;
+  if(mode==='set'){
+    newAmt=amt;
+    changeStr=`${sym}${amt.toLocaleString()}으로 설정`;
+  } else if(mode==='in'){
+    newAmt=a.avgPrice+amt;
+    changeStr=`${sym}${a.avgPrice.toLocaleString()} + ${sym}${amt.toLocaleString()} = ${sym}${newAmt.toLocaleString()}`;
+  } else {
+    newAmt=Math.max(0,a.avgPrice-amt);
+    changeStr=`${sym}${a.avgPrice.toLocaleString()} − ${sym}${amt.toLocaleString()} = ${sym}${newAmt.toLocaleString()}`;
+  }
+  const modeColors={set:'#34c759',in:'#007aff',out:'#ff3b30'};
+  const modeLabels={set:'잔액 설정',in:'입금',out:'출금'};
+  pendingTrade={id, mode:'edit_cash', newAmt};
+  const titleEl=document.getElementById('tc_title');
+  const detailEl=document.getElementById('tc_detail');
+  const confirmBtn=document.getElementById('tc_confirm');
+  titleEl.innerHTML=`<span style="color:${modeColors[mode]}">💵 현금 ${modeLabels[mode]} 확인</span>`;
+  detailEl.innerHTML=`<b>${a.name}</b><br>${changeStr}<br>
+    <span style="color:var(--color-tertiary);font-size:11px;">저장 후 잔액: ${sym}${newAmt.toLocaleString()}</span>`;
+  confirmBtn.style.background=modeColors[mode];
+  confirmBtn.textContent='확인';
+  document.getElementById('tradeConfirmModal').classList.add('open');
+}
 
 function setCashMode(mode){
   cashMode = mode;
