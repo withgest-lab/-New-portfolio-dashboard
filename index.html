@@ -681,16 +681,19 @@ async function yahooFetch(url){
 }
 
 // 한국 주식 전용: 네이버 금융 모바일 API
-// ticker가 .KS 또는 .KQ로 끝나는 경우 사용
+// ticker가 .KS/.KQ/.KN 이거나 순수 6자리 숫자인 경우 사용
+function isKoreanTicker(ticker){
+  return /\.(KS|KQ|KN)$/i.test(ticker) || /^\d{6}$/.test(ticker.trim());
+}
+
 async function fetchNaver(ticker){
-  // 005930.KS → 005930
-  const code = ticker.replace(/\.(KS|KQ|KN)$/i,'');
+  // 005930.KS → 005930, 381180 → 381180
+  const code = ticker.replace(/\.(KS|KQ|KN)$/i,'').trim();
   const urls = [
     `https://m.stock.naver.com/api/stock/${code}/basic`,
     `https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`,
   ];
   for(const naverUrl of urls){
-    // 프록시 경유
     for(const proxy of PROXIES){
       try{
         const res = await fetch(proxy+encodeURIComponent(naverUrl),{
@@ -703,7 +706,6 @@ async function fetchNaver(ticker){
         try{ json=JSON.parse(text); }catch(e){ continue; }
         if(json?.contents) try{ json=JSON.parse(json.contents); }catch(e){}
 
-        // m.stock.naver.com/api/stock/{code}/basic 응답
         const price = json?.closePrice
           ? parseInt(String(json.closePrice).replace(/,/g,''))
           : json?.nv
@@ -738,12 +740,13 @@ async function fetchYahoo(ticker){
 
 // 종목 시세 조회: 한국 주식은 네이버 우선, 실패 시 야후 폴백
 async function fetchPrice(ticker){
-  const isKorean = /\.(KS|KQ|KN)$/i.test(ticker);
-  if(isKorean){
+  if(isKoreanTicker(ticker)){
     const r = await fetchNaver(ticker);
     if(r.ok) return r;
     // 네이버 실패 시 야후로 폴백
-    return fetchYahoo(ticker);
+    // 순수 숫자 코드면 .KS 붙여서 야후 시도
+    const yahooTicker = /^\d{6}$/.test(ticker.trim()) ? ticker.trim()+'.KS' : ticker;
+    return fetchYahoo(yahooTicker);
   }
   return fetchYahoo(ticker);
 }
