@@ -511,7 +511,14 @@ const GSYNC_KEY   = 'pf_gsync_v1'; // Google Sheets 설정 저장
    Google Sheets 동기화
 ════════════════════════════════════════ */
 function loadGSyncConfig(){
-  try{ return JSON.parse(localStorage.getItem(GSYNC_KEY)||'{}'); }catch(e){ return {}; }
+  const DEFAULT_CFG = {
+    url: 'https://script.google.com/macros/s/AKfycbxMiMYqwWaHCTGFlW-wn8RbIPxDb547uoUk1hUV2DOUgX-K6N1HMFr49zKaxZAWZfLh/exec',
+    key: 'mnjw32$'
+  };
+  try{
+    const saved = JSON.parse(localStorage.getItem(GSYNC_KEY)||'{}');
+    return (saved.url && saved.key) ? saved : DEFAULT_CFG;
+  }catch(e){ return DEFAULT_CFG; }
 }
 function saveGSyncConfig(cfg){
   localStorage.setItem(GSYNC_KEY, JSON.stringify(cfg));
