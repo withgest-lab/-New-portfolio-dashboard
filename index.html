@@ -819,22 +819,19 @@ async function fetchAllPrices(saveSnapshot=false){
 
     const targets=assets.filter(a=>a.ticker&&a.ticker!=='—'&&a.category!=='cash');
 
-    // 한국 주식 / 해외 주식 분리
-    const krTargets      = targets.filter(a=>isKoreanTicker(a.ticker));
-    const foreignTargets = targets.filter(a=>!isKoreanTicker(a.ticker));
-
-    // 해외 주식: Apps Script 배치 조회 우선
+    // ★ Apps Script로 전체 티커 배치 조회 (한국/미국/일본 모두)
     let appsScriptPrices = {};
-    if(foreignTargets.length>0){
-      appsScriptPrices = await fetchPriceViaAppsScript(foreignTargets.map(a=>a.ticker));
+    if(targets.length>0){
+      appsScriptPrices = await fetchPriceViaAppsScript(targets.map(a=>a.ticker));
     }
 
-    // 전체 병렬 조회
+    // Apps Script 실패한 종목만 개별 폴백 조회
     const results=await Promise.allSettled(targets.map(async a=>{
-      // 해외 주식이고 Apps Script 결과가 있으면 사용
-      if(!isKoreanTicker(a.ticker) && appsScriptPrices[a.ticker]?.ok){
+      // Apps Script 결과 있으면 우선 사용
+      if(appsScriptPrices[a.ticker]?.ok){
         return {id:a.id, name:a.name, r:appsScriptPrices[a.ticker]};
       }
+      // 폴백: 한국=네이버, 미국/일본=야후 프록시
       return {id:a.id, name:a.name, r:await fetchPrice(a.ticker)};
     }));
     let ok=0,fail=0;
@@ -848,11 +845,12 @@ async function fetchAllPrices(saveSnapshot=false){
           const newPrev  = p.value.r.prev;
           a.currentPrice = newPrice;
           if(newPrev && newPrev !== newPrice){
-            a.prevPrice = newPrev; // 전일 데이터 정상
+            a.prevPrice = newPrev;
           } else if(!a.prevPrice || a.prevPrice===0){
-            a.prevPrice = newPrice; // 초기값
+            a.prevPrice = newPrice;
           }
-          // else: 기존 prevPrice 유지 (전일 데이터 없음)
+          // 마켓 상태 저장 (PRE/REGULAR/POST/CLOSED)
+          if(p.value.r.marketState) a.marketState = p.value.r.marketState;
           ok++;
         }
       }else{
@@ -1045,10 +1043,19 @@ function renderTable(){
       return '₩'+Math.round(p).toLocaleString('ko-KR');
     };
 
-    // 현금 현재가 표시: USD/JPY면 "금액 (환율적용)" 표시
+    // 현금 현재가 표시
     let cashPriceDisplay = priceStr(a.currentPrice);
     if(a.category==='cash' && a.currency!=='KRW'){
       cashPriceDisplay = `${priceStr(a.currentPrice)}<br><span style="font-size:10px;color:var(--color-tertiary)">₩${Math.round(evKRW(a)).toLocaleString('ko-KR')}</span>`;
+    }
+
+    // 현재가 표시 (프리장/애프터장 뱃지 포함)
+    let priceDisplay = priceStr(a.currentPrice);
+    if(a.category!=='cash' && a.marketState && a.marketState!=='REGULAR' && a.marketState!=='CLOSED'){
+      const stateLabel = a.marketState==='PRE' ? '프리' : '애프터';
+      const stateColor = a.marketState==='PRE' ? '#ff9500' : '#5856d6';
+      priceDisplay = `${priceStr(a.currentPrice)}<br>
+        <span style="font-size:9px;color:${stateColor};font-weight:600;">${stateLabel}장</span>`;
     }
 
     // 현금은 전일比 대신 환율 표시
@@ -1064,7 +1071,7 @@ function renderTable(){
         <div class="name-sub">${a.ticker==='—'?'현금':a.ticker}</div>
       </td>
       <td><span class="cat-badge" style="background:${cc}20;color:${cc}">${tableBadge(a)}</span></td>
-      <td style="font-size:11px;">${cashPriceDisplay}</td>
+      <td style="font-size:11px;">${a.category==='cash'?cashPriceDisplay:priceDisplay}</td>
       <td style="font-size:11px;">${dayChgCell}</td>
       <td style="font-size:11px;">${priceStr(a.avgPrice)}</td>
       <td style="font-size:11px;">${a.category==='cash'?'—':a.quantity.toLocaleString()}</td>
@@ -2268,6 +2275,54 @@ function drawLineChart(){
     ctx.setLineDash([]);
   }
 
+  // ── 미국장 세션 배경 (프리/정규/애프터) ──
+  if(chartHistory.length>1){
+    const dst=isUSDST();
+    // 각 세션 시간 (한국 시간 기준 분)
+    const sessions = dst
+      ? [{label:'프리',  color:'rgba(255,149,0,0.06)',  start:21*60,    end:22*60+30},
+         {label:'정규',  color:'rgba(0,122,255,0.04)',  start:22*60+30, end:29*60},    // 다음날 05:00
+         {label:'애프터',color:'rgba(88,86,214,0.06)', start:29*60,    end:33*60}]     // 09:00
+      : [{label:'프리',  color:'rgba(255,149,0,0.06)',  start:22*60,    end:23*60+30},
+         {label:'정규',  color:'rgba(0,122,255,0.04)',  start:23*60+30, end:30*60},    // 다음날 06:00
+         {label:'애프터',color:'rgba(88,86,214,0.06)', start:30*60,    end:34*60}];    // 10:00
+
+    const t0=chartHistory[0].ts;
+    const t1=chartHistory[chartHistory.length-1].ts;
+    const tRng=t1-t0||1;
+
+    // 차트 기간 내 각 날짜별로 세션 배경 그리기
+    const dayMs=24*60*60*1000;
+    const startDay=new Date(t0); startDay.setHours(0,0,0,0);
+
+    for(let d=startDay.getTime(); d<=t1+dayMs; d+=dayMs){
+      sessions.forEach(sess=>{
+        // 세션 시작/끝 timestamp 계산
+        const sStart = d + (sess.start % (24*60)) * 60000 + Math.floor(sess.start/(24*60))*dayMs;
+        const sEnd   = d + (sess.end   % (24*60)) * 60000 + Math.floor(sess.end  /(24*60))*dayMs;
+
+        // 차트 범위와 겹치는 부분만
+        const drawStart = Math.max(sStart, t0);
+        const drawEnd   = Math.min(sEnd,   t1);
+        if(drawStart >= drawEnd) return;
+
+        const x1 = gL + ((drawStart-t0)/tRng)*gW;
+        const x2 = gL + ((drawEnd  -t0)/tRng)*gW;
+
+        ctx.fillStyle = sess.color;
+        ctx.fillRect(x1, gT, x2-x1, gH);
+
+        // 세션 레이블 (상단에 작게)
+        if(x2-x1 > 30){
+          ctx.fillStyle='rgba(0,0,0,0.25)';
+          ctx.font='8px Pretendard,sans-serif';
+          ctx.textAlign='center';
+          ctx.fillText(sess.label, (x1+x2)/2, gT+9);
+        }
+      });
+    }
+  }
+
   // ── 스냅샷 수직 점선 + 종목별 교차 마커 ──
   // 마커 종류: 0=원, 1=사각, 2=삼각, 3=다이아몬드, 4=X, 5=+, ...
   const MARKERS=['circle','square','triangle','diamond','cross','plus','star'];
@@ -2761,22 +2816,59 @@ function confirmSaveSheets(){
 ════════════════════════════════════════ */
 // 자동 스냅샷 시간 (한국 시간 기준)
 // 22:30, 23:30, 03:00, 05:00, 06:00, 09:00, 10:00, 12:00, 15:00, 15:30
-// 자동 스냅샷 시간 (한국 시간 기준)
-// 평일(월~금): 미국장 + 한국장 전체
-// 토요일: 미국장 마감 전후만 (03:00, 05:00, 06:00)
-// 일요일: 없음
-const AUTO_SNAP_TIMES = [
-  {h:22,m:30, days:[1,2,3,4,5]},   // 미국장 시작 직전 (월~금)
-  {h:23,m:30, days:[1,2,3,4,5]},   // 미국장 시작 후 1시간 (월~금)
-  {h: 3,m: 0, days:[1,2,3,4,5,6]}, // 미국장 중간 (월~토)
-  {h: 5,m: 0, days:[1,2,3,4,5,6]}, // 미국장 마감 전 (월~토)
-  {h: 6,m: 0, days:[1,2,3,4,5,6]}, // 미국장 마감 직후 (월~토)
-  {h: 9,m: 0, days:[1,2,3,4,5]},   // 한국장 시작 (월~금)
-  {h:10,m: 0, days:[1,2,3,4,5]},   // 한국장 오전 (월~금)
-  {h:12,m: 0, days:[1,2,3,4,5]},   // 한국장 점심 (월~금)
-  {h:15,m: 0, days:[1,2,3,4,5]},   // 한국장 마감 전 (월~금)
-  {h:15,m:30, days:[1,2,3,4,5]},   // 한국장 마감 (월~금)
-];
+// ── 서머타임 자동 감지 ──
+// 미국 서머타임: 3월 둘째 일요일 ~ 11월 첫째 일요일
+function isUSDST(){
+  const now=new Date();
+  const y=now.getFullYear();
+  // 3월 둘째 일요일
+  const mar=new Date(y,2,1);
+  const dstStart=new Date(y,2,14-((mar.getDay()||7)-1));
+  // 11월 첫째 일요일
+  const nov=new Date(y,10,1);
+  const dstEnd=new Date(y,10,7-((nov.getDay()||7)-1));
+  return now>=dstStart && now<dstEnd;
+}
+
+// ── 자동 스냅샷 시간 (서머타임 반영, 한국 시간 기준) ──
+// 서머타임 O: 미국 정규장 22:30~05:00, 프리 21:00~22:30, 애프터 05:00~09:00
+// 서머타임 X: 미국 정규장 23:30~06:00, 프리 22:00~23:30, 애프터 06:00~10:00
+function getAutoSnapTimes(){
+  const dst=isUSDST();
+  if(dst){
+    return [
+      {h:21,m: 0, days:[1,2,3,4,5]},   // 프리장 시작 (서머타임)
+      {h:22,m:30, days:[1,2,3,4,5]},   // 미국 정규장 시작
+      {h: 0,m:30, days:[1,2,3,4,5,6]}, // 정규장 중간
+      {h: 2,m: 0, days:[1,2,3,4,5,6]}, // 정규장 중간
+      {h: 4,m: 0, days:[1,2,3,4,5,6]}, // 정규장 마감 전
+      {h: 5,m: 0, days:[1,2,3,4,5,6]}, // 정규장 마감/애프터 시작
+      {h: 7,m: 0, days:[1,2,3,4,5,6]}, // 애프터장 중간
+      {h: 9,m: 0, days:[1,2,3,4,5]},   // 한국장 시작
+      {h:10,m: 0, days:[1,2,3,4,5]},   // 한국장 오전
+      {h:12,m: 0, days:[1,2,3,4,5]},   // 한국장 점심
+      {h:15,m: 0, days:[1,2,3,4,5]},   // 한국장 마감 전
+      {h:15,m:30, days:[1,2,3,4,5]},   // 한국장 마감
+    ];
+  } else {
+    return [
+      {h:22,m: 0, days:[1,2,3,4,5]},   // 프리장 시작 (비서머타임)
+      {h:23,m:30, days:[1,2,3,4,5]},   // 미국 정규장 시작
+      {h: 1,m:30, days:[1,2,3,4,5,6]}, // 정규장 중간
+      {h: 3,m: 0, days:[1,2,3,4,5,6]}, // 정규장 중간
+      {h: 5,m: 0, days:[1,2,3,4,5,6]}, // 정규장 마감 전
+      {h: 6,m: 0, days:[1,2,3,4,5,6]}, // 정규장 마감/애프터 시작
+      {h: 8,m: 0, days:[1,2,3,4,5,6]}, // 애프터장 중간
+      {h: 9,m: 0, days:[1,2,3,4,5]},   // 한국장 시작
+      {h:10,m: 0, days:[1,2,3,4,5]},   // 한국장 오전
+      {h:12,m: 0, days:[1,2,3,4,5]},   // 한국장 점심
+      {h:15,m: 0, days:[1,2,3,4,5]},   // 한국장 마감 전
+      {h:15,m:30, days:[1,2,3,4,5]},   // 한국장 마감
+    ];
+  }
+}
+// 동적으로 현재 스케줄 사용
+const AUTO_SNAP_TIMES = getAutoSnapTimes();
 // 매시 정각 자동 저장 (하루 24회)
 // snapFiredDate를 localStorage에 저장 → 페이지 새로고침 후에도 중복 저장 방지
 
