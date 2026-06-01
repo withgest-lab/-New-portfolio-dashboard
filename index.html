@@ -297,18 +297,51 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     </div>
     <!-- 현금 폼 -->
     <div id="form_cash" class="add-form" style="display:none;">
-      <label>이름
-        <input id="cf_name" placeholder="현금·CMA·예금 등" style="width:120px">
-      </label>
-      <label>금액
-        <input id="cf_amount" type="number" placeholder="0" style="width:130px">
-      </label>
-      <label>통화<select id="cf_cur">
-        <option value="KRW">KRW ₩</option>
-        <option value="USD">USD $</option>
-        <option value="JPY">JPY ¥</option>
-      </select></label>
-      <button class="btn" style="background:#34c75920;color:#34c759;" onclick="addCash()">+ 현금 추가</button>
+      <!-- 이름 + 통화 -->
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;">
+        <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+          이름
+          <input id="cf_name" placeholder="현금·CMA·예금 등"
+            style="width:120px;border:1px solid var(--color-border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;">
+        </label>
+        <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+          통화
+          <select id="cf_cur" style="border:1px solid var(--color-border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;background:var(--color-card);color:var(--color-text);">
+            <option value="KRW">KRW ₩</option>
+            <option value="USD">USD $</option>
+            <option value="JPY">JPY ¥</option>
+          </select>
+        </label>
+      </div>
+      <!-- 3가지 모드 선택 -->
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button id="cf_mode_set" onclick="setCashMode('set')"
+          style="flex:1;padding:7px 4px;font-size:12px;border-radius:8px;border:1.5px solid #34c759;
+                 background:#34c75920;color:#34c759;font-weight:700;cursor:pointer;">
+          잔액 설정
+        </button>
+        <button id="cf_mode_in" onclick="setCashMode('in')"
+          style="flex:1;padding:7px 4px;font-size:12px;border-radius:8px;border:1.5px solid var(--color-border);
+                 background:var(--color-section-bg);color:var(--color-tertiary);cursor:pointer;">
+          + 입금
+        </button>
+        <button id="cf_mode_out" onclick="setCashMode('out')"
+          style="flex:1;padding:7px 4px;font-size:12px;border-radius:8px;border:1.5px solid var(--color-border);
+                 background:var(--color-section-bg);color:var(--color-tertiary);cursor:pointer;">
+          - 출금
+        </button>
+      </div>
+      <!-- 금액 입력 -->
+      <div style="display:flex;gap:8px;align-items:flex-end;">
+        <label id="cf_amount_label" style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+          잔액
+          <input id="cf_amount" type="number" placeholder="0" min="0"
+            style="width:150px;border:1px solid var(--color-border);border-radius:8px;
+                   padding:6px 10px;font-size:13px;font-family:inherit;">
+        </label>
+        <button class="btn" style="background:#34c75920;color:#34c759;padding:7px 14px;"
+          onclick="addCash()">확인</button>
+      </div>
     </div>
     <div class="form-status" id="formStatus"></div>
   </div>
@@ -1294,13 +1327,14 @@ function delAsset(id){
    매수/매도 탭
 ════════════════════════════════════════ */
 function switchTab(tab){
-  // 탭 이동 시 이전 탭 폼 초기화
   resetBuyForm();
   resetSellForm();
   document.getElementById('cf_name').value='';
   document.getElementById('cf_amount').value='';
   document.getElementById('cf_cur').value='KRW';
   document.getElementById('formStatus').textContent='';
+  // 현금 탭으로 전환 시 모드 초기화
+  if(tab==='cash'){ cashMode='set'; setTimeout(()=>setCashMode('set'),50); }
 
   ['buy','sell','cash'].forEach(t=>{
     const form=document.getElementById(`form_${t}`);
@@ -1488,6 +1522,29 @@ function sellAsset(){
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
+let cashMode = 'set'; // 'set' | 'in' | 'out'
+
+function setCashMode(mode){
+  cashMode = mode;
+  const btns = {
+    set: document.getElementById('cf_mode_set'),
+    in:  document.getElementById('cf_mode_in'),
+    out: document.getElementById('cf_mode_out'),
+  };
+  const colors = {set:'#34c759', in:'#007aff', out:'#ff3b30'};
+  const labels = {set:'잔액', in:'입금 금액', out:'출금 금액'};
+  Object.entries(btns).forEach(([k,btn])=>{
+    if(!btn) return;
+    const active = k===mode;
+    btn.style.background  = active ? colors[k]+'20' : 'var(--color-section-bg)';
+    btn.style.borderColor = active ? colors[k]       : 'var(--color-border)';
+    btn.style.color       = active ? colors[k]       : 'var(--color-tertiary)';
+    btn.style.fontWeight  = active ? '700' : '400';
+  });
+  const lbl = document.getElementById('cf_amount_label');
+  if(lbl) lbl.childNodes[0].textContent = labels[mode];
+}
+
 function addCash(){
   const name   = document.getElementById('cf_name').value.trim() || '현금';
   const amount = parseFloat(document.getElementById('cf_amount').value);
@@ -1496,19 +1553,40 @@ function addCash(){
   if(isNaN(amount)||amount<=0){ st.textContent='❌ 금액을 입력해 주세요.'; return; }
   const sym = CUR_SYM[cur];
 
-  // 확인 팝업
-  pendingTrade = {mode:'form_cash', name, amount, cur};
+  // 기존 현금 찾기
+  const existing = assets.find(a=>a.category==='cash'&&a.name===name&&a.currency===cur);
+  let newAmount = amount;
+  let modeLabel = '잔액 설정';
+  let changeStr = '';
+
+  if(cashMode==='set'){
+    newAmount  = amount;
+    modeLabel  = '잔액 설정';
+    changeStr  = `${sym}${amount.toLocaleString()}으로 설정`;
+  } else if(cashMode==='in'){
+    const cur_amt = existing ? existing.avgPrice : 0;
+    newAmount  = cur_amt + amount;
+    modeLabel  = '입금';
+    changeStr  = `${sym}${cur_amt.toLocaleString()} + ${sym}${amount.toLocaleString()} = ${sym}${newAmount.toLocaleString()}`;
+  } else if(cashMode==='out'){
+    const cur_amt = existing ? existing.avgPrice : 0;
+    newAmount  = Math.max(0, cur_amt - amount);
+    modeLabel  = '출금';
+    changeStr  = `${sym}${cur_amt.toLocaleString()} - ${sym}${amount.toLocaleString()} = ${sym}${newAmount.toLocaleString()}`;
+  }
+
+  pendingTrade = {mode:'form_cash', name, amount:newAmount, cur};
   const titleEl    = document.getElementById('tc_title');
   const detailEl   = document.getElementById('tc_detail');
   const confirmBtn = document.getElementById('tc_confirm');
-  titleEl.innerHTML = `<span style="color:#34c759">💵 현금 추가 확인</span>`;
+  const modeColors = {set:'#34c759', in:'#007aff', out:'#ff3b30'};
+  titleEl.innerHTML = `<span style="color:${modeColors[cashMode]}">💵 현금 ${modeLabel} 확인</span>`;
   detailEl.innerHTML = `
-    <b>${name}</b><br>
-    금액: <b>${sym}${amount.toLocaleString()}</b><br>
-    통화: ${cur}<br>
-    <span style="color:var(--color-tertiary)">같은 이름의 현금이 있으면 금액이 업데이트됩니다.</span>`;
-  confirmBtn.style.background = '#34c759';
-  confirmBtn.textContent = '추가 확인';
+    <b>${name}</b> (${cur})<br>
+    ${changeStr}<br>
+    <span style="color:var(--color-tertiary);font-size:11px;">저장 후 잔액: ${sym}${newAmount.toLocaleString()}</span>`;
+  confirmBtn.style.background = modeColors[cashMode];
+  confirmBtn.textContent = '확인';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
