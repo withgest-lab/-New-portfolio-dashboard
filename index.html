@@ -849,8 +849,11 @@ async function fetchAllPrices(saveSnapshot=false){
           } else if(!a.prevPrice || a.prevPrice===0){
             a.prevPrice = newPrice;
           }
-          // 마켓 상태 저장 (PRE/REGULAR/POST/CLOSED)
-          if(p.value.r.marketState) a.marketState = p.value.r.marketState;
+          // 장 구분 + 프리/애프터/정규 가격 저장
+          if(p.value.r.marketState)   a.marketState   = p.value.r.marketState;
+          if(p.value.r.regularPrice)  a.regularPrice  = p.value.r.regularPrice;
+          if(p.value.r.prePrice)      a.prePrice      = p.value.r.prePrice;
+          if(p.value.r.postPrice)     a.postPrice     = p.value.r.postPrice;
           ok++;
         }
       }else{
@@ -1049,21 +1052,50 @@ function renderTable(){
       cashPriceDisplay = `${priceStr(a.currentPrice)}<br><span style="font-size:10px;color:var(--color-tertiary)">₩${Math.round(evKRW(a)).toLocaleString('ko-KR')}</span>`;
     }
 
-    // 현재가 표시 (프리장/애프터장 뱃지 포함)
-    let priceDisplay = priceStr(a.currentPrice);
-    if(a.category!=='cash' && a.marketState && a.marketState!=='REGULAR' && a.marketState!=='CLOSED'){
-      const stateLabel = a.marketState==='PRE' ? '프리' : '애프터';
-      const stateColor = a.marketState==='PRE' ? '#ff9500' : '#5856d6';
-      priceDisplay = `${priceStr(a.currentPrice)}<br>
-        <span style="font-size:9px;color:${stateColor};font-weight:600;">${stateLabel}장</span>`;
-    }
+    // ── 현재가 셀: 정규가 + 프리/애프터 두 줄 표시 ──
+    const ms = a.marketState;
+    const prePrice  = a.prePrice  || null;
+    const postPrice = a.postPrice || null;
+    const regPrice  = a.regularPrice || a.currentPrice;
 
-    // 현금은 전일比 대신 환율 표시
-    let dayChgCell = a.category==='cash'
-      ? (a.currency==='USD'?`<span style="font-size:10px;color:var(--color-tertiary)">$1=₩${FX.USD.toFixed(0)}</span>`
-        :a.currency==='JPY'?`<span style="font-size:10px;color:var(--color-tertiary)">¥1=₩${FX.JPY.toFixed(2)}</span>`
-        :'—')
-      : `<span class="${updn(dayChg)}">${fmtPct(dayChg)}</span>`;
+    let priceDisplay = priceStr(a.currentPrice);
+    let dayChgCell;
+
+    if(a.category==='cash'){
+      // 현금: 환율 표시
+      priceDisplay = cashPriceDisplay;
+      dayChgCell = a.currency==='USD'
+        ? `<span style="font-size:10px;color:var(--color-tertiary)">$1=₩${FX.USD.toFixed(0)}</span>`
+        : a.currency==='JPY'
+        ? `<span style="font-size:10px;color:var(--color-tertiary)">¥1=₩${FX.JPY.toFixed(2)}</span>`
+        : '—';
+    } else {
+      // ── 현재가 셀 ──
+      // 정규가 항상 첫 줄
+      const regChg  = a.prevPrice>0?((regPrice-a.prevPrice)/a.prevPrice)*100:0;
+      const regAmtStr = (regPrice-a.prevPrice>=0?'+':'')+priceStr(regPrice-a.prevPrice);
+
+      // 프리/애프터 두 번째 줄
+      const hasExtra = (ms==='PRE'&&prePrice) || (ms==='POST'&&postPrice);
+      const extraPrice = ms==='PRE'?prePrice:postPrice;
+      const extraLabel = ms==='PRE'?'프리':'애프터';
+      const extraColor = ms==='PRE'?'#ff9500':'#5856d6';
+      const extraChg   = a.prevPrice>0&&extraPrice?((extraPrice-a.prevPrice)/a.prevPrice)*100:null;
+      const extraAmtStr= extraPrice?(extraPrice-a.prevPrice>=0?'+':'')+priceStr(extraPrice-a.prevPrice):'';
+
+      priceDisplay =
+        `<span style="font-size:10px;color:var(--color-tertiary);">정규</span> ${priceStr(regPrice)}` +
+        (hasExtra
+          ? `<br><span style="font-size:10px;color:${extraColor};font-weight:600;">${extraLabel}</span> ${priceStr(extraPrice)}`
+          : '');
+
+      // ── 전일比 셀: 정규 % + 프리/애프터 % 두 줄 ──
+      dayChgCell =
+        `<span class="${updn(regChg)}" style="font-size:11px;">${fmtPct(regChg)}</span>` +
+        (hasExtra && extraChg!==null
+          ? `<br><span class="${updn(extraChg)}" style="font-size:10px;color:${extraColor};">${fmtPct(extraChg)}</span>`
+          : '');
+    }
 
     let rows=`<tr style="cursor:pointer;" ondblclick="toggleQuickTrade('${a.id}')">
       <td class="name-cell">
@@ -2275,54 +2307,6 @@ function drawLineChart(){
     ctx.setLineDash([]);
   }
 
-  // ── 미국장 세션 배경 (프리/정규/애프터) ──
-  if(chartHistory.length>1){
-    const dst=isUSDST();
-    // 각 세션 시간 (한국 시간 기준 분)
-    const sessions = dst
-      ? [{label:'프리',  color:'rgba(255,149,0,0.06)',  start:21*60,    end:22*60+30},
-         {label:'정규',  color:'rgba(0,122,255,0.04)',  start:22*60+30, end:29*60},    // 다음날 05:00
-         {label:'애프터',color:'rgba(88,86,214,0.06)', start:29*60,    end:33*60}]     // 09:00
-      : [{label:'프리',  color:'rgba(255,149,0,0.06)',  start:22*60,    end:23*60+30},
-         {label:'정규',  color:'rgba(0,122,255,0.04)',  start:23*60+30, end:30*60},    // 다음날 06:00
-         {label:'애프터',color:'rgba(88,86,214,0.06)', start:30*60,    end:34*60}];    // 10:00
-
-    const t0=chartHistory[0].ts;
-    const t1=chartHistory[chartHistory.length-1].ts;
-    const tRng=t1-t0||1;
-
-    // 차트 기간 내 각 날짜별로 세션 배경 그리기
-    const dayMs=24*60*60*1000;
-    const startDay=new Date(t0); startDay.setHours(0,0,0,0);
-
-    for(let d=startDay.getTime(); d<=t1+dayMs; d+=dayMs){
-      sessions.forEach(sess=>{
-        // 세션 시작/끝 timestamp 계산
-        const sStart = d + (sess.start % (24*60)) * 60000 + Math.floor(sess.start/(24*60))*dayMs;
-        const sEnd   = d + (sess.end   % (24*60)) * 60000 + Math.floor(sess.end  /(24*60))*dayMs;
-
-        // 차트 범위와 겹치는 부분만
-        const drawStart = Math.max(sStart, t0);
-        const drawEnd   = Math.min(sEnd,   t1);
-        if(drawStart >= drawEnd) return;
-
-        const x1 = gL + ((drawStart-t0)/tRng)*gW;
-        const x2 = gL + ((drawEnd  -t0)/tRng)*gW;
-
-        ctx.fillStyle = sess.color;
-        ctx.fillRect(x1, gT, x2-x1, gH);
-
-        // 세션 레이블 (상단에 작게)
-        if(x2-x1 > 30){
-          ctx.fillStyle='rgba(0,0,0,0.25)';
-          ctx.font='8px Pretendard,sans-serif';
-          ctx.textAlign='center';
-          ctx.fillText(sess.label, (x1+x2)/2, gT+9);
-        }
-      });
-    }
-  }
-
   // ── 스냅샷 수직 점선 + 종목별 교차 마커 ──
   // 마커 종류: 0=원, 1=사각, 2=삼각, 3=다이아몬드, 4=X, 5=+, ...
   const MARKERS=['circle','square','triangle','diamond','cross','plus','star'];
@@ -2451,6 +2435,11 @@ function drawLineChart(){
     labeled.forEach(l=>{
       const aly=Math.max(gT+4,Math.min(gT+gH-2,l._aly));
       const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(1)+'%';
+      // 장 구분 뱃지
+      const a=assets.find(x=>x.id===l.assetId);
+      const ms=a?.marketState;
+      const stateStr=ms==='PRE'?' 프리':ms==='POST'?' 애프터':'';
+      const stateColor=ms==='PRE'?'#ff9500':ms==='POST'?'#5856d6':null;
       const txt=l.label+' '+pctStr;
       if(Math.abs(aly-l._ly)>3){
         ctx.strokeStyle=l.color; ctx.lineWidth=0.5; ctx.setLineDash([2,2]);
@@ -2459,6 +2448,14 @@ function drawLineChart(){
       }
       ctx.fillStyle=l.color;
       ctx.fillText(txt, LBL_X, aly+3);
+      // 장 구분 뱃지 (종목명+% 오른쪽에 작게)
+      if(stateStr && stateColor){
+        const tw=ctx.measureText(txt).width;
+        ctx.font=`bold 7px Pretendard,sans-serif`;
+        ctx.fillStyle=stateColor;
+        ctx.fillText(stateStr, LBL_X+tw+2, aly+3);
+        ctx.font=`bold ${LBL_FONT}px Pretendard,sans-serif`;
+      }
     });
   }
 
