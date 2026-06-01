@@ -1878,7 +1878,7 @@ function renderSummary(){
   const pnl  = ev - cost;
   const rtn  = cost > 0 ? (pnl/cost)*100 : 0;
 
-  // 오늘 손익 = 1D 시작점(전일 22:30) 스냅샷 기준
+  // 오늘 손익 = 1D 시작점(서머타임:22:30 / 비서머타임:23:30) 스냅샷 기준
   // → 어제 미국장 + 오늘 한국장 변동 모두 반영
   const oneDStart = getPeriodStart('1D').getTime();
   const allSnaps  = loadSnaps().sort((a,b) => a.timestamp - b.timestamp);
@@ -2076,10 +2076,13 @@ function getPeriodStart(period){
   const now=new Date();
   function d605(d){d.setHours(6,5,0,0);return d;}
   if(period==='1D'){
+    // 서머타임: 22:30 / 비서머타임: 23:30
+    const dst=isUSDST();
+    const mktH=dst?22:23, mktM=30;
     const t=new Date(now);
-    t.setHours(22,30,0,0);
-    if(now.getHours()<22||(now.getHours()===22&&now.getMinutes()<30)){
-      t.setDate(t.getDate()-1); // 22:30 이전이면 전날 22:30
+    t.setHours(mktH,mktM,0,0);
+    if(now.getHours()<mktH||(now.getHours()===mktH&&now.getMinutes()<mktM)){
+      t.setDate(t.getDate()-1);
     }
     return t;
   }
@@ -2201,21 +2204,19 @@ function drawLineChart(){
     const fi=raw.findIndex(v=>v!=null&&v>0);
     if(fi===-1) return;
 
-    // 1D일 때: prevPrice(전일 종가)를 기준으로 % 계산
+    // 1D 기준값: KR=전일종가×수량(고정), US/JP=전일종가×현재환율×수량(환율변동반영)
     let fv;
     if(use1DBase && a.prevPrice>0 && a.category!=='cash'){
-      // prevPrice를 KRW로 환산
-      const prevKRW = a.currency==='USD' ? a.prevPrice*FX.USD
-                    : a.currency==='JPY' ? a.prevPrice*FX.JPY
-                    : a.prevPrice;
-      // 현재 평가금액(evKRW) 기준으로 prevPrice 비율 역산
-      const curKRW  = raw[raw.length-1] || evKRW(a);
-      const curPrice= a.currentPrice||1;
-      const curPriceKRW = a.currency==='USD' ? curPrice*FX.USD
-                        : a.currency==='JPY' ? curPrice*FX.JPY
-                        : curPrice;
-      // fv = 전일 종가 기준 평가금액
-      fv = curPriceKRW>0 ? curKRW * (prevKRW/curPriceKRW) : raw[fi];
+      const qty = a.quantity || 1;
+      if(a.currency==='KRW'){
+        fv = a.prevPrice * qty;
+      } else if(a.currency==='USD'){
+        fv = a.prevPrice * FX.USD * qty;
+      } else if(a.currency==='JPY'){
+        fv = a.prevPrice * FX.JPY * qty;
+      } else {
+        fv = raw[fi];
+      }
     } else {
       fv = raw[fi];
     }
