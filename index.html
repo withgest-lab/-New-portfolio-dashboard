@@ -2118,26 +2118,52 @@ function buildSnapshotHistory(period){
     return result;
   }
 
-  const beforeStart=allSnaps.filter(s=>s.timestamp<startTs&&s.totalValue>0).sort((a,b)=>b.timestamp-a.timestamp)[0];
-
-  // 데이터 없으면 현재값 수평선
-  if(!snaps.length&&!beforeStart){
-    return[{ts:Date.now()-1000,byAsset:nowByAsset,total:nowTotal},{ts:Date.now(),byAsset:nowByAsset,total:nowTotal}];
+  // 1D: 전일 정규장 종가 기반 가상 기준점 생성
+  // 모든 종목을 prevPrice(전일종가) 기준으로 KRW 환산 → 그래프 시작점이 항상 0%
+  function makePrevBaseByAsset(){
+    const result={};
+    let total=0;
+    assets.forEach(a=>{
+      if(a.category==='cash'){
+        result[a.id]=Math.round(evKRW(a)); // 현금은 현재값 그대로
+        total+=result[a.id];
+        return;
+      }
+      const prev=a.prevPrice||a.currentPrice||0;
+      const qty=a.quantity||1;
+      let krw=0;
+      if(a.currency==='USD')      krw=prev*FX.USD*qty;
+      else if(a.currency==='JPY') krw=prev*FX.JPY*qty;
+      else                         krw=prev*qty;
+      result[a.id]=Math.round(krw);
+      total+=Math.round(krw);
+    });
+    return{byAsset:result,total};
   }
 
   const history=[];
-  if(beforeStart){
-    // period 시작 전 스냅샷이 있으면 → period 시작점에서 시작
-    history.push({ts:startTs,byAsset:snapToByAsset(beforeStart),total:beforeStart.totalValue});
+
+  if(period==='1D'){
+    // 1D: 항상 전일 정규장 종가 기반 가상점을 시작으로
+    const base=makePrevBaseByAsset();
+    history.push({ts:startTs, byAsset:base.byAsset, total:base.total, isBase:true});
     // 기간 내 스냅샷 추가
     snaps.forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
-  } else if(snaps.length){
-    // period 시작 전 데이터 없으면 → 첫 스냅샷 시각을 실제 시작점으로 사용
-    // 첫 스냅샷은 시작점으로 1번만 push
-    history.push({ts:snaps[0].timestamp,byAsset:snapToByAsset(snaps[0]),total:snaps[0].totalValue});
-    // 나머지 스냅샷 추가 (첫 번째 제외)
-    snaps.slice(1).forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
+  } else {
+    const beforeStart=allSnaps.filter(s=>s.timestamp<startTs&&s.totalValue>0).sort((a,b)=>b.timestamp-a.timestamp)[0];
+    // 데이터 없으면 현재값 수평선
+    if(!snaps.length&&!beforeStart){
+      return[{ts:Date.now()-1000,byAsset:nowByAsset,total:nowTotal},{ts:Date.now(),byAsset:nowByAsset,total:nowTotal}];
+    }
+    if(beforeStart){
+      history.push({ts:startTs,byAsset:snapToByAsset(beforeStart),total:beforeStart.totalValue});
+      snaps.forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
+    } else if(snaps.length){
+      history.push({ts:snaps[0].timestamp,byAsset:snapToByAsset(snaps[0]),total:snaps[0].totalValue});
+      snaps.slice(1).forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
+    }
   }
+
   history.push({ts:Date.now(),byAsset:nowByAsset,total:nowTotal});
   return history;
 }
@@ -2188,9 +2214,7 @@ function drawLineChart(){
   if(!chartHistory.length) return;
 
   // ── % 변화율 계산 ──
-  // 1D: prevPrice(전일 종가) 기준 → 테이블 전일比와 일치
-  // 그 외: 첫 스냅샷 기준
-  const use1DBase = currentPeriod==='1D';
+  // 첫 스냅샷 기준 (1D는 buildSnapshotHistory에서 전일종가 가상 기준점 삽입됨)
   const lines=[];
   if(showSum){
     const raw=chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
@@ -2204,23 +2228,9 @@ function drawLineChart(){
     const fi=raw.findIndex(v=>v!=null&&v>0);
     if(fi===-1) return;
 
-    // 1D 기준값: KR=전일종가×수량(고정), US/JP=전일종가×현재환율×수량(환율변동반영)
-    let fv;
-    if(use1DBase && a.prevPrice>0 && a.category!=='cash'){
-      const qty = a.quantity || 1;
-      if(a.currency==='KRW'){
-        fv = a.prevPrice * qty;
-      } else if(a.currency==='USD'){
-        fv = a.prevPrice * FX.USD * qty;
-      } else if(a.currency==='JPY'){
-        fv = a.prevPrice * FX.JPY * qty;
-      } else {
-        fv = raw[fi];
-      }
-    } else {
-      fv = raw[fi];
-    }
-    if(!fv || fv<=0) fv=raw[fi];
+    // 기준값: 첫 스냅샷 기준
+    // 1D는 buildSnapshotHistory에서 전일종가 가상점이 맨 앞에 삽입되므로 자동 0% 시작
+    const fv = raw[fi] || 1;
 
     const pct=raw.map((v,idx)=>idx<fi?null:(v!=null?((v-fv)/fv)*100:null));
     const events=[];
