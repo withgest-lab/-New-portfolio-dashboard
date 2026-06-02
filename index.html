@@ -1793,13 +1793,15 @@ function drawDonut(canvasId,data){
   let angle=-Math.PI/2;const GAP=0.016;
   data.forEach(d=>{
     const sw=(d.value/total)*2*Math.PI;
+    // 너무 작은 섹터는 건너뜀 (역방향 호 버그 방지)
+    if(sw < GAP*2 + 0.001){ angle+=sw; return; }
     // 섹터 그리기
     ctx.beginPath();
     ctx.arc(cx,cy,OR,angle+GAP,angle+sw-GAP);
     ctx.arc(cx,cy,IR,angle+sw-GAP,angle+GAP,true);
     ctx.closePath();ctx.fillStyle=d.color;ctx.fill();
-    // 섹터 중간에 % 표시 (모든 섹터)
-    if(sw>0.25){
+    // 섹터 중간에 % 표시 (3% 이상만)
+    if(sw>0.19){
       const mid=angle+sw/2;
       const r=(IR+OR)/2;
       const tx=cx+Math.cos(mid)*r;
