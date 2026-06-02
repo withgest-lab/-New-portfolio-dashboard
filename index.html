@@ -2002,11 +2002,11 @@ function isNewAsset(a, existingIds){
   // 1순위: 스냅샷 이력 기반 (가장 정확)
   if(existingIds.size > 0) return !existingIds.has(a.id);
   // 2순위: 스냅샷 없을 때 → avgPrice vs prevPrice 차이로 판별
-  // avgPrice ≈ prevPrice (10% 이내) → 오늘 매수한 신규 종목
-  // avgPrice << prevPrice (10% 이상 차이) → 오래전부터 보유한 기존 종목
+  // 신규 종목: avgPrice ≈ prevPrice (7% 이내) → 오늘 매수
+  // 기존 종목: avgPrice vs prevPrice 차이가 큼 (7% 이상)
   if(!a.prevPrice || !a.avgPrice) return true;
   const diff = Math.abs(a.prevPrice - a.avgPrice) / a.avgPrice;
-  return diff < 0.10; // 10% 이내면 오늘 매수 신규 종목
+  return diff < 0.07; // 7% 이내면 오늘 매수 신규 종목
 }
 
 // 22:30 기준점용: USD 기존 종목만
@@ -2245,7 +2245,11 @@ function drawLineChart(){
   const pd=(maxN-minN)*0.2||2;
   const Lmin=minN-pd, Lmax=maxN+pd, Lrng=Lmax-Lmin||1;
 
-  const outLines=lines.filter(l=>l.vals.some(v=>v!=null&&(v>uf||v<lf)));
+  // 이상치 라인: non-null 값이 2개 이상인 라인만 대상 (신규종목 단일점 제외)
+  const outLines=lines.filter(l=>{
+    const validVals = l.vals.filter(v=>v!=null&&isFinite(v));
+    return validVals.length >= 2 && validVals.some(v=>v>uf||v<lf);
+  });
   const hasOut=outLines.length>0;
   let Rmin=0,Rmax=1,Rrng=1;
   if(hasOut){
