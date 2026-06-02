@@ -2404,41 +2404,47 @@ function drawLineChart(){
     line._useY=useY;
   });
 
-  // ── 종목명+% (박스 안 오른쪽 여백) ──
-  const LBL_X=gL+gW+10;
-  const labeled=lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
+  // ── 종목명+% (박스 오른쪽 여백, 겹침 방지) ──
+  const LBL_X = gL + gW + 10;
+  const LINE_H = 12; // 줄 높이
+  const labeled = lines.filter(l=>l._ly!=null).sort((a,b)=>a._ly-b._ly);
   if(labeled.length){
-    labeled[0]._aly=labeled[0]._ly;
+    // 1단계: 원래 위치 설정
+    labeled.forEach(l=>{ l._aly = l._ly; });
+
+    // 2단계: 위→아래 겹침 해소 (아래로 밀기)
     for(let i=1;i<labeled.length;i++){
-      labeled[i]._aly=(labeled[i]._ly-labeled[i-1]._aly<13)
-        ?labeled[i-1]._aly+13:labeled[i]._ly;
+      if(labeled[i]._aly - labeled[i-1]._aly < LINE_H)
+        labeled[i]._aly = labeled[i-1]._aly + LINE_H;
     }
-    ctx.font=`bold ${LBL_FONT}px Pretendard,sans-serif`; ctx.textAlign='left';
+    // 3단계: 아래→위 겹침 해소 (위로 밀기, 그래프 영역 초과 방지)
+    for(let i=labeled.length-2;i>=0;i--){
+      if(labeled[i+1]._aly - labeled[i]._aly < LINE_H)
+        labeled[i]._aly = labeled[i+1]._aly - LINE_H;
+    }
+
+    ctx.font = `bold ${LBL_FONT}px Pretendard,sans-serif`;
+    ctx.textAlign = 'left';
     labeled.forEach(l=>{
-      const aly=Math.max(gT+4,Math.min(gT+gH-2,l._aly));
-      const pctStr=(l._lp>=0?'+':'')+l._lp.toFixed(2)+'%';
+      const aly = Math.max(gT+6, Math.min(gT+gH-4, l._aly));
+      const pctStr = (l._lp>=0?'+':'') + l._lp.toFixed(2) + '%';
+      const txt = l.label + ' ' + pctStr;
+      const maxW = RLABEL - 6;
 
-      // 장 구분 레이블 제거 - 정규장만 표시
-      const txt=l.label+' '+pctStr;
-
-      // 긴 종목명 줄바꿈 처리
-      const maxLblW = RLABEL - 6;
-      const fullTxt = txt;
-      const txtW = ctx.measureText(fullTxt).width;
-
-      if(Math.abs(aly-l._ly)>3){
-        ctx.strokeStyle=l.color; ctx.lineWidth=0.5; ctx.setLineDash([2,2]);
-        ctx.beginPath(); ctx.moveTo(l._lx+4,l._ly); ctx.lineTo(LBL_X-2,aly); ctx.stroke();
+      // 연결선 (위치 이동된 경우)
+      if(Math.abs(aly - l._ly) > 3){
+        ctx.strokeStyle = l.color; ctx.lineWidth = 0.5; ctx.setLineDash([2,2]);
+        ctx.beginPath(); ctx.moveTo(l._lx+4, l._ly); ctx.lineTo(LBL_X-2, aly); ctx.stroke();
         ctx.setLineDash([]);
       }
 
-      if(txtW <= maxLblW){
-        ctx.fillStyle=l.color;
+      ctx.fillStyle = l.color;
+      if(ctx.measureText(txt).width <= maxW){
         ctx.fillText(txt, LBL_X, aly+3);
       } else {
-        ctx.fillStyle=l.color;
+        // 종목명과 % 두 줄로
         ctx.fillText(l.label, LBL_X, aly-2);
-        ctx.fillText(pctStr, LBL_X, aly+8);
+        ctx.fillText(pctStr,  LBL_X, aly+8);
       }
     });
   }
