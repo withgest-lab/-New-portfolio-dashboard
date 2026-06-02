@@ -1974,18 +1974,6 @@ function getPeriodStart(period){
   return new Date(now.getFullYear()-5,now.getMonth(),now.getDate(),6,5,0);
 }
 
-// ── 종목별 기준단가 반환 ──
-// 전일 종가(prevPrice)가 현재가와 다르면 prevPrice 사용 (기존 종목)
-// 당일 매수 신규 종목은 avgPrice 사용
-// 현금은 기준단가 없음(null)
-function getBasePriceKRW(a){
-  if(a.category==='cash') return null;
-  const base = (a.prevPrice && a.prevPrice !== a.currentPrice) ? a.prevPrice : a.avgPrice;
-  if(a.currency==='USD') return base * FX.USD;
-  if(a.currency==='JPY') return base * FX.JPY;
-  return base;
-}
-
 function buildSnapshotHistory(period){
   const start   = getPeriodStart(period);
   const startTs = start.getTime();
@@ -2074,56 +2062,34 @@ function drawLineChart(){
   if(!chartHistory.length) return;
 
   // ── % 변화율 계산 ──
-  // ── % 계산: 단가 기준으로 통일 ──
-  // 공식: pct[i] = (스냅샷단가 - 기준단가) / 기준단가 × 100
-  // 스냅샷단가 = 스냅샷의 종목 평가금액 / 현재수량
-  // 기준단가   = getBasePriceKRW(a) → prevPrice or avgPrice
-  // 현금: 항상 0% (그래프 제외)
-  // 합계: 각 종목별 pct의 가중평균 (현재 평가금액 비중)
+  // ── % 계산: 스냅샷 기반으로 완전 통일 ──
+  // 공식: pct[i] = (raw[i] - fv) / fv × 100
+  // fv = 종목의 첫 스냅샷 평가금액 (= chartHistory[fi])
+  // → 수량 변화 무관, 합계도 자동 정확, getBasePriceKRW 불필요
 
   const lines=[];
-  const totalEvNow = totalEv() || 1;
 
   if(showSum){
-    // 합계: 종목별 pct × 비중 합산
-    // raw는 그냥 총평가금액 흐름 (절대값, 레전드용)
     const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    // 기준 합계 = 각 종목 기준단가 × 수량 합산
-    const baseTotalKRW = assets.reduce((s,a)=>{
-      if(a.category==='cash') return s + evKRW(a);
-      const bp = getBasePriceKRW(a);
-      return s + (bp||0)*(a.quantity||1);
-    }, 0) || 1;
-    const sumVals = rawSum.map(v=> v>0 ? ((v - baseTotalKRW)/baseTotalKRW)*100 : null);
+    const fvSum = rawSum.find(v=>v>0) || 1;
+    const sumVals = rawSum.map(v=> v>0 ? ((v-fvSum)/fvSum)*100 : null);
     lines.push({label:'합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
 
   assets.forEach((a,i)=>{
     if(!selectedAssets.has(a.id)) return;
-    if(a.category==='cash') return; // 현금 그래프 제외
-
-    const curQty = a.quantity || 1;
-    const basePriceKRW = getBasePriceKRW(a) || 1; // 기준단가 (KRW)
+    if(a.category==='cash') return;
 
     const raw = chartHistory.map(h=> h.byAsset[a.id] ?? null);
     const fi = raw.findIndex(v=>v!=null);
     if(fi===-1) return;
 
-    // 각 스냅샷의 단가 역산:
-    // byQty 있으면 → 스냅샷 당시 수량으로 나눠서 단가 구함 (정확)
-    // byQty 없으면 → 현재 수량으로 나눔 (추정, 수량변화 없는 경우만 정확)
-    const snapPrices = chartHistory.map((h,idx)=>{
-      const ev = h.byAsset[a.id];
-      if(ev==null) return null;
-      const snapQty = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : curQty;
-      return ev / snapQty; // 스냅샷 당시 단가 (KRW)
-    });
-
-    // pct = (스냅샷 단가 - 기준단가) / 기준단가 × 100
-    const pct = snapPrices.map((p,idx)=>{
-      if(idx<fi || p==null) return null;
-      return ((p - basePriceKRW) / basePriceKRW) * 100;
+    // fv = 첫 등장 스냅샷 평가금액 → 이게 0% 기준
+    const fv = raw[fi] || 1;
+    const pct = raw.map((v,idx)=>{
+      if(idx<fi || v==null) return null;
+      return ((v - fv) / fv) * 100;
     });
 
     const events=[];
@@ -2416,8 +2382,8 @@ function drawLineChart(){
 
 
 function renderStatBar(){
-  // drawLineChart와 완전히 동일한 공식 사용
-  // pct = (스냅샷단가 - 기준단가) / 기준단가 × 100
+  // drawLineChart와 완전히 동일한 스냅샷 기반 공식
+  // pct = (raw[i] - fv) / fv × 100  (fv = 첫 스냅샷값)
   const bar=document.getElementById('statBar');
   const items=[
     ...(showSum?[null]:[]),
@@ -2428,17 +2394,14 @@ function renderStatBar(){
   bar.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:4px;">'+
   items.map(a=>{
     if(!a){
-      // 합계
+      // 합계: 전체 평가금액 기준
       const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-      const baseTotalKRW = assets.reduce((s,a2)=>{
-        if(a2.category==='cash') return s + evKRW(a2);
-        return s + (getBasePriceKRW(a2)||0)*(a2.quantity||1);
-      }, 0) || 1;
-      const last = rawSum[rawSum.length-1] || 0;
+      const fvSum = rawSum.find(v=>v>0) || 1;
+      const last = rawSum[rawSum.length-1] || fvSum;
       const validRaw = rawSum.filter(v=>v>0);
       const hi = Math.max(...validRaw), lo = Math.min(...validRaw);
-      const pct = ((last - baseTotalKRW) / baseTotalKRW) * 100;
-      const diff = last - baseTotalKRW;
+      const pct = ((last - fvSum) / fvSum) * 100;
+      const diff = last - fvSum;
       return '<div class="stat-item">'+
         '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
         '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
@@ -2447,7 +2410,6 @@ function renderStatBar(){
     }
 
     if(a.category==='cash'){
-      // 현금: 0% 고정
       const ev = evKRW(a);
       const itemColor = '#82E0AA';
       return '<div class="stat-item">'+
@@ -2457,33 +2419,22 @@ function renderStatBar(){
       '</div>';
     }
 
-    // 일반 종목
-    const qty = a.quantity || 1;
-    const basePriceKRW = getBasePriceKRW(a) || 1;
-    const baseEv = basePriceKRW * qty;
+    // 일반 종목: drawLineChart와 동일
     const rawVals = chartHistory.map(h=>h.byAsset[a.id]??null);
     const fi = rawVals.findIndex(v=>v!=null);
     if(fi===-1) return '';
+    const fv = rawVals[fi] || 1;
 
-    // 각 스냅샷 단가 역산 (drawLineChart와 동일)
-    const snapPricesS = chartHistory.map((h,idx)=>{
-      const ev = h.byAsset[a.id];
-      if(ev==null) return null;
-      const snapQty = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : qty;
-      return ev / snapQty;
-    });
-    const pctVals = snapPricesS.map((p,idx)=>{
-      if(idx<fi||p==null) return null;
-      return ((p - basePriceKRW) / basePriceKRW) * 100;
+    const pctVals = rawVals.map((v,idx)=>{
+      if(idx<fi||v==null) return null;
+      return ((v - fv) / fv) * 100;
     }).filter(v=>v!=null);
     if(!pctVals.length) return '';
 
-    const lastSnapPrice = snapPricesS[snapPricesS.length-1] ?? snapPricesS.filter(v=>v!=null).slice(-1)[0];
-    const lastPct = lastSnapPrice!=null ? ((lastSnapPrice - basePriceKRW)/basePriceKRW)*100 : 0;
-    const hi = Math.max(...pctVals), lo = Math.min(...pctVals);
     const lastRaw = rawVals[rawVals.length-1] ?? rawVals.filter(v=>v!=null).slice(-1)[0];
-    const lastEv = lastRaw ?? (basePriceKRW * qty);
-    const diff = lastEv - (basePriceKRW * qty);
+    const lastPct = lastRaw!=null ? ((lastRaw - fv)/fv)*100 : 0;
+    const hi = Math.max(...pctVals), lo = Math.min(...pctVals);
+    const diff = (lastRaw??fv) - fv;
     const itemColor = LINE_COLS[assets.indexOf(a)%LINE_COLS.length];
 
     return '<div class="stat-item">'+
