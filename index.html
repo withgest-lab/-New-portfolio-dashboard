@@ -837,9 +837,10 @@ function saveSnap(isManual=false){
   const total = totalEv();
   if(total < 1000000) return;
   const byAsset = Object.fromEntries(assets.map(a=>[a.id, Math.round(evKRW(a))]));
+  // 수량도 함께 저장 → 단가 역산용 (수량변화 시 정확한 % 계산)
+  const byQty = Object.fromEntries(assets.map(a=>[a.id, a.quantity||1]));
   let snaps = loadSnaps();
-  // ★ 수동 스냅샷 표시 (manual:true → 압축 시 항상 보존)
-  snaps.push({id:uid(), timestamp:Date.now(), totalValue:Math.round(total), byAsset, manual:isManual});
+  snaps.push({id:uid(), timestamp:Date.now(), totalValue:Math.round(total), byAsset, byQty, manual:isManual});
   snaps = compressSnaps(snaps);
   saveSnaps(snaps);
   renderSnaps();
@@ -2102,20 +2103,27 @@ function drawLineChart(){
     if(!selectedAssets.has(a.id)) return;
     if(a.category==='cash') return; // 현금 그래프 제외
 
-    const qty = a.quantity || 1;
+    const curQty = a.quantity || 1;
     const basePriceKRW = getBasePriceKRW(a) || 1; // 기준단가 (KRW)
-    const baseEv = basePriceKRW * qty; // 기준 평가금액
 
     const raw = chartHistory.map(h=> h.byAsset[a.id] ?? null);
     const fi = raw.findIndex(v=>v!=null);
     if(fi===-1) return;
 
-    // pct = (스냅샷 평가금액 - 기준 평가금액) / 기준 평가금액 × 100
-    // 기준 평가금액 = basePriceKRW × 현재수량 (고정값)
-    // → 수량 변화와 무관하게 단가 기준 수익률과 동일
-    const pct = raw.map((v,idx)=>{
-      if(idx<fi || v==null) return null;
-      return ((v - baseEv) / baseEv) * 100;
+    // 각 스냅샷의 단가 역산:
+    // byQty 있으면 → 스냅샷 당시 수량으로 나눠서 단가 구함 (정확)
+    // byQty 없으면 → 현재 수량으로 나눔 (추정, 수량변화 없는 경우만 정확)
+    const snapPrices = chartHistory.map((h,idx)=>{
+      const ev = h.byAsset[a.id];
+      if(ev==null) return null;
+      const snapQty = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : curQty;
+      return ev / snapQty; // 스냅샷 당시 단가 (KRW)
+    });
+
+    // pct = (스냅샷 단가 - 기준단가) / 기준단가 × 100
+    const pct = snapPrices.map((p,idx)=>{
+      if(idx<fi || p==null) return null;
+      return ((p - basePriceKRW) / basePriceKRW) * 100;
     });
 
     const events=[];
@@ -2457,18 +2465,25 @@ function renderStatBar(){
     const fi = rawVals.findIndex(v=>v!=null);
     if(fi===-1) return '';
 
-    // pct = (스냅샷 평가금액 - 기준 평가금액) / 기준 평가금액 × 100 (drawLineChart와 동일)
-    const pctVals = rawVals.map((v,idx)=>{
-      if(idx<fi||v==null) return null;
-      return ((v - baseEv) / baseEv) * 100;
+    // 각 스냅샷 단가 역산 (drawLineChart와 동일)
+    const snapPricesS = chartHistory.map((h,idx)=>{
+      const ev = h.byAsset[a.id];
+      if(ev==null) return null;
+      const snapQty = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : qty;
+      return ev / snapQty;
+    });
+    const pctVals = snapPricesS.map((p,idx)=>{
+      if(idx<fi||p==null) return null;
+      return ((p - basePriceKRW) / basePriceKRW) * 100;
     }).filter(v=>v!=null);
     if(!pctVals.length) return '';
 
-    const lastRaw = rawVals[rawVals.length-1] ?? rawVals.filter(v=>v!=null).slice(-1)[0];
-    const lastPct = lastRaw!=null ? ((lastRaw - baseEv)/baseEv)*100 : 0;
+    const lastSnapPrice = snapPricesS[snapPricesS.length-1] ?? snapPricesS.filter(v=>v!=null).slice(-1)[0];
+    const lastPct = lastSnapPrice!=null ? ((lastSnapPrice - basePriceKRW)/basePriceKRW)*100 : 0;
     const hi = Math.max(...pctVals), lo = Math.min(...pctVals);
-    const lastEv = lastRaw ?? baseEv;
-    const diff = lastEv - baseEv;
+    const lastRaw = rawVals[rawVals.length-1] ?? rawVals.filter(v=>v!=null).slice(-1)[0];
+    const lastEv = lastRaw ?? (basePriceKRW * qty);
+    const diff = lastEv - (basePriceKRW * qty);
     const itemColor = LINE_COLS[assets.indexOf(a)%LINE_COLS.length];
 
     return '<div class="stat-item">'+
