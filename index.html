@@ -2006,14 +2006,56 @@ function buildSnapshotHistory(period){
   const snapsBeforeStart = allSnaps.filter(s=>s.timestamp<startTs);
   const beforeStart = snapsBeforeStart.sort((a,b)=>b.timestamp-a.timestamp)[0];
 
+  // 1D: prevPrice 기반 가상 기준점 생성
+  // → 스냅샷이 없거나 22:30 이전 스냅샷이 없어도 전일 종가 기준으로 0% 시작
+  function makePrevBasePoint(){
+    // 1D 가상 기준점:
+    // - 미국(USD): prevPrice(어제 정규장 종가) 기준 → 미국장 변화량 반영
+    // - 한국/일본/현금: currentPrice 기준 → 오늘 장 끝났으므로 0% 수평 유지
+    const byAsset = {};
+    const byQty   = {};
+    let total = 0;
+    assets.forEach(a=>{
+      const qty = a.quantity || 1;
+      let baseKRW;
+      if(a.category==='cash'){
+        baseKRW = evKRW(a);
+      } else if(a.currency==='USD'){
+        // 미국: 전일 종가 기준
+        const basePrice = (a.prevPrice && a.prevPrice !== a.currentPrice)
+          ? a.prevPrice : a.avgPrice;
+        baseKRW = basePrice * FX.USD * qty;
+      } else {
+        // 한국/일본: 현재가 기준 → 0% 수평
+        baseKRW = evKRW(a);
+      }
+      byAsset[a.id] = Math.round(baseKRW);
+      byQty[a.id]   = qty;
+      total += Math.round(baseKRW);
+    });
+    return {byAsset, byQty, total};
+  }
+
   if(!snaps.length && !beforeStart){
+    if(period==='1D'){
+      // 스냅샷 없어도 prevPrice 기준점 + 현재값으로 그래프 표시
+      const base = makePrevBasePoint();
+      return [
+        {ts:startTs,     byAsset:base.byAsset, byQty:base.byQty, total:base.total},
+        {ts:Date.now(),  byAsset:nowByAsset,   byQty:nowByQty,   total:nowTotal}
+      ];
+    }
     return [
       {ts:Date.now()-1000, byAsset:nowByAsset, byQty:nowByQty, total:nowTotal},
       {ts:Date.now(),      byAsset:nowByAsset, byQty:nowByQty, total:nowTotal}
     ];
   }
 
-  if(beforeStart){
+  if(period==='1D'){
+    // 1D: 항상 prevPrice 기준 가상점을 시작으로
+    const base = makePrevBasePoint();
+    history.push({ts:startTs, byAsset:base.byAsset, byQty:base.byQty, total:base.total});
+  } else if(beforeStart){
     const p = snapToPoint(beforeStart);
     history.push({ts:startTs, byAsset:p.byAsset, byQty:p.byQty, total:beforeStart.totalValue});
   } else if(snaps.length){
