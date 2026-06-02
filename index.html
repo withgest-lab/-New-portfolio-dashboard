@@ -1994,28 +1994,32 @@ function getPeriodStart(period){
 // 미국(USD): prevPrice 기준 (어제 22:30 종가)
 // 한국/일본(KRW/JPY): prevPrice 기준 (오늘 09:00 종가)
 // 신규 종목(스냅샷에 없던 종목): null → 첫 스냅샷이 기준
-// 22:30 기준점용: USD 종목만 계산
-// - 기존 종목: prevPrice != currentPrice → prevPrice 기준
-// - 신규 종목: prevPrice == currentPrice → null (제외)
-// - KRW/JPY: null (09:00 기준점에서 따로 처리)
-function getBaseEvKRW(a){
-  if(a.category === 'cash') return evKRW(a);
-  if(a.currency !== 'USD') return null; // KRW/JPY는 09:00 기준점에서 처리
-  const qty = a.quantity || 1;
-  // prevPrice == currentPrice 이면 당일 신규 매수 → 제외
-  if(!a.prevPrice || a.prevPrice === a.currentPrice) return null;
-  return a.prevPrice * FX.USD * qty;
+// 신규 종목 판별:
+// 1순위: 스냅샷 이력에 있으면 기존 종목
+// 2순위: 스냅샷 이력이 비어있을 때(초기화 후) → prevPrice < currentPrice * 0.99 이면 기존 종목
+//        (즉, 오늘 매수해서 prevPrice ≈ avgPrice ≈ currentPrice인 경우만 신규)
+function isNewAsset(a, existingIds){
+  if(existingIds.size > 0) return !existingIds.has(a.id);
+  // 스냅샷 없음: prevPrice가 currentPrice와 많이 다르면 기존 종목
+  if(!a.prevPrice) return true;
+  const diff = Math.abs(a.prevPrice - a.currentPrice) / a.currentPrice;
+  return diff < 0.001; // 0.1% 이내면 당일 신규 매수로 판별
 }
 
-// 09:00 기준점용: KRW/JPY 종목만 계산
-// - 기존 종목: prevPrice != currentPrice → prevPrice 기준
-// - 신규 종목: prevPrice == currentPrice → null (제외)
-function getBaseEvKRWkr(a){
+// 22:30 기준점용: USD 기존 종목만
+function getBaseEvKRW(a, existingIds){
+  if(a.category === 'cash') return evKRW(a);
+  if(a.currency !== 'USD') return null;
+  if(isNewAsset(a, existingIds)) return null;
+  return (a.prevPrice || a.currentPrice) * FX.USD * (a.quantity||1);
+}
+
+// 09:00 기준점용: KRW/JPY 기존 종목만
+function getBaseEvKRWkr(a, existingIds){
   if(a.currency === 'USD' || a.category === 'cash') return null;
-  const qty = a.quantity || 1;
-  if(!a.prevPrice || a.prevPrice === a.currentPrice) return null;
-  const p = a.prevPrice;
-  return a.currency === 'JPY' ? p * FX.JPY * qty : p * qty;
+  if(isNewAsset(a, existingIds)) return null;
+  const p = a.prevPrice || a.currentPrice;
+  return a.currency === 'JPY' ? p*FX.JPY*(a.quantity||1) : p*(a.quantity||1);
 }
 
 function buildSnapshotHistory(period){
@@ -2058,7 +2062,7 @@ function buildSnapshotHistory(period){
     let usTotal = 0;
     assets.forEach(a=>{
       const qty = a.quantity || 1;
-      const ev  = getBaseEvKRW(a); // USD + 현금만
+      const ev  = getBaseEvKRW(a, existingBeforeUs); // USD + 현금만, 스냅샷 기반 신규 판별
       if(ev == null) return;
       usBase[a.id] = Math.round(ev);
       usQty[a.id]  = qty;
@@ -2067,14 +2071,13 @@ function buildSnapshotHistory(period){
     history.push({ts: startTs, byAsset: usBase, byQty: usQty, total: usTotal});
 
     // ── 기준점 2: 오늘 09:00 (한국/일본 종목 추가) ──
-    // 한국/일본 기존 종목: prevPrice 기준값
-    // 신규 종목 (prevPrice==currentPrice): 제외 → 첫 스냅샷부터 시작
+    // 스냅샷 이력 기반으로 신규 종목 판별
     if(krOpenTs > startTs && krOpenTs < Date.now()){
       const krBase = {...usBase}, krQtyMap = {...usQty};
       let krTotal = usTotal;
       assets.forEach(a=>{
         const qty = a.quantity || 1;
-        const ev  = getBaseEvKRWkr(a); // KRW/JPY만
+        const ev  = getBaseEvKRWkr(a, existingBeforeKr); // KRW/JPY만, 스냅샷 기반 신규 판별
         if(ev == null) return;
         krBase[a.id]   = Math.round(ev);
         krQtyMap[a.id] = qty;
