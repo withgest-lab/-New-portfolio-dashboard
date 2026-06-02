@@ -2116,7 +2116,6 @@ async function buildChartHistory(){
 }
 
 
-    <button class="toggle-ctrl" onclick="toggleSum()" style="background:${showSum?'var(--color-accent)':'var(--color-section-bg)'};color:${showSum?'#fff':'var(--color-text)'}">합계</button>`
 function drawLineChart(){
   const cv=document.getElementById('lineChart');
   if(!cv) return;
@@ -2538,8 +2537,6 @@ function renderStatBar(){
   // 전체 선택 = 모든 종목 + 합계 모두 켜진 상태
   const allSelected = assets.every(a=>selectedAssets.has(a.id)) && showSum;
   document.getElementById('assetToggles').innerHTML=
-    `<button class="toggle-ctrl" onclick="toggleAll()" style="background:${allSelected?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected?'#fff':'var(--color-text)'}">
-
 function renderToggles(){
   const allSelected=assets.every(a=>selectedAssets.has(a.id))&&showSum;
   document.getElementById('assetToggles').innerHTML=
