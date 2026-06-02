@@ -2120,6 +2120,7 @@ function drawLineChart(){
     const fv = raw[fi] || 1;
     const startIdx = fi; // fi 이전은 null → 그래프에 안 그려짐
 
+    // 전량매도 시 마지막이 null → 그래프에서 자연스럽게 끊김 (정상)
     const pct=raw.map((v,idx)=>idx<startIdx?null:(v!=null?((v-fv)/fv)*100:null));
     const events=[];
     for(let j=1;j<pct.length;j++){
@@ -2425,11 +2426,16 @@ function renderStatBar(){
       if(!a) return Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0);
       return h.byAsset[a.id]??null;
     });
-    const vals=rawVals.filter(v=>v!=null&&v>0);
-    if(!vals.length) return'';
-    const first=vals[0],last=vals[vals.length-1];
-    const hi=Math.max(...vals),lo=Math.min(...vals);
-    const diff=last-first,pct=first>0?(diff/first)*100:0;
+    // 그래프와 동일한 기준: 첫 non-null 값을 기준(0%)으로
+    const fi=rawVals.findIndex(v=>v!=null&&v>0);
+    if(fi===-1) return'';
+    const fv=rawVals[fi]; // 그래프의 fv와 동일
+    // 마지막 유효값 사용 (전량매도로 현재값이 null인 경우 마지막 스냅샷값 사용)
+    const validVals=rawVals.filter(v=>v!=null&&v>0);
+    if(!validVals.length) return'';
+    const last=rawVals[rawVals.length-1]??validVals[validVals.length-1];
+    const hi=Math.max(...validVals),lo=Math.min(...validVals);
+    const diff=last-fv, pct=fv>0?(diff/fv)*100:0;
     const itemColor=a?(a.category==='cash'?'#82E0AA':LINE_COLS[assets.indexOf(a)%LINE_COLS.length]):'#555';
     return'<div class="stat-item">'+
       '<div class="stat-lbl" style="color:'+itemColor+';font-weight:700;">'+(a?a.name:'합계')+'</div>'+
