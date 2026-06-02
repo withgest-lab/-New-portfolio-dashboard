@@ -1936,7 +1936,7 @@ function saveChartSel(){
   }));
 }
 const _chartSel = loadChartSel();
-let currentPeriod = '1D';
+let currentPeriod = localStorage.getItem('currentPeriod') || '1D';
 let chartHistory  = [];
 let selectedAssets = _chartSel.sel;
 let showSum        = _chartSel.sum;
@@ -2123,6 +2123,7 @@ function buildSnapshotHistory(period){
 
 function setPeriod(p){
   currentPeriod=p;
+  localStorage.setItem('currentPeriod', p);
   document.querySelectorAll('#periodTabs button').forEach(b=>b.classList.toggle('active',b.textContent===p));
   buildChartHistory();
 }
@@ -2178,15 +2179,34 @@ function drawLineChart(){
   const lines=[];
 
   if(showSum){
-    // 합계: prevPrice 기반 기준값 (스냅샷 초기화 후에도 정확)
-    const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
+    // 합계: 모든 종목이 포함된 시점부터 계산
+    // 각 히스토리 포인트의 총합 계산
+    const assetIds = assets.filter(a=>a.category!=='cash').map(a=>a.id);
+    const rawSum = chartHistory.map(h=>{
+      // 모든 비현금 종목이 포함된 포인트만 유효
+      const vals = Object.values(h.byAsset);
+      return vals.reduce((s,v)=>s+(v||0),0);
+    });
+
+    // baseTotalKRW: 각 종목의 기준가 합산
+    // - 기존 종목: prevPrice 기준
+    // - 신규 종목(isNewAsset): avgPrice 기준
+    const allSnapsForSum = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+    const startTs1D = getPeriodStart('1D').getTime();
+    const snapsBefore = allSnapsForSum.filter(s=>s.timestamp < startTs1D);
+    const existIds = new Set(snapsBefore.flatMap(s=>Object.keys(s.byAsset||{})));
+
     const baseTotalKRW = assets.reduce((s,a)=>{
       if(a.category==='cash') return s + evKRW(a);
       const qty = a.quantity || 1;
-      const bp  = a.prevPrice || a.currentPrice;
+      // 신규/기존 판별
+      const isNew = isNewAsset(a, existIds);
+      const bp = isNew ? (a.avgPrice||a.currentPrice) : (a.prevPrice||a.currentPrice);
       return s + (a.currency==='USD' ? bp*FX.USD*qty
                : a.currency==='JPY' ? bp*FX.JPY*qty : bp*qty);
-    }, 0) || rawSum.find(v=>v>0) || 1;
+    }, 0) || 1;
+
+    // 합계 라인: baseTotalKRW 기준으로 % 계산
     const sumVals = rawSum.map(v=> v!=null&&v>0 ? ((v-baseTotalKRW)/baseTotalKRW)*100 : null);
     lines.push({label:'합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
