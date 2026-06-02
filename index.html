@@ -1927,7 +1927,10 @@ let chartHistory  = [];
 let selectedAssets = _chartSel.sel;
 let showSum        = _chartSel.sum;
 
-// 저장된 선택 목록이 없거나 새 종목이 추가된 경우 자동으로 선택
+// selectedAssets 초기화:
+// 1. 삭제/매도된 종목 ID 제거 (assets에 없는 ID 정리)
+[...selectedAssets].forEach(id=>{ if(!assets.find(a=>a.id===id)) selectedAssets.delete(id); });
+// 2. 선택 목록이 비어있으면 전체 선택
 if(selectedAssets.size===0){
   assets.forEach(a=>selectedAssets.add(a.id));
 } else {
@@ -1970,24 +1973,23 @@ function buildSnapshotHistory(period){
   const nowByAsset=Object.fromEntries(assets.map(a=>[a.id,Math.round(evKRW(a))]));
   const nowTotal=totalEv();
 
+  // 전체 스냅샷(기간 무관)에서 등장한 적 있는 종목 ID (신규/삭제 종목 판별용)
+  const appearsInAnySnap = new Set(allSnaps.flatMap(s=>Object.keys(s.byAsset||{})));
+
   function snapToByAsset(s){
     // byAsset이 있으면 그대로 사용 (가장 정확)
     if(s.byAsset&&Object.keys(s.byAsset).length>0) return{...s.byAsset};
     // byAsset 없는 구형 스냅샷: 현재 종목 비율로 추정
-    // 단, 삭제된 종목은 반영 안 될 수 있음 (구형 데이터 한계)
+    // 신규 종목(스냅샷에 한 번도 없던)은 제외
     const scale=nowTotal>0?s.totalValue/nowTotal:1;
     const result={};
     assets.forEach(a=>{
       if(a.category==='cash') return;
+      if(!appearsInAnySnap.has(a.id)) return;
       result[a.id]=Math.round(evKRW(a)*scale);
     });
     return result;
   }
-
-  // 1D: 전일 정규장 종가 기반 가상 기준점 생성
-  // 모든 종목을 prevPrice(전일종가) 기준으로 KRW 환산 → 그래프 시작점이 항상 0%
-  // 기간 내 스냅샷에 등장한 적 있는 종목 ID 목록 (신규 종목 판별용)
-  const appearsInSnaps = new Set(snaps.flatMap(s=>Object.keys(s.byAsset||{})));
 
   function makePrevBaseByAsset(){
     const result={};
@@ -1998,9 +2000,8 @@ function buildSnapshotHistory(period){
         total+=result[a.id];
         return;
       }
-      // 스냅샷에 한 번도 등장하지 않은 신규 종목은 기준점에서 제외 → 첫 등장 시점부터 0% 시작
-      if(!appearsInSnaps.has(a.id)) return;
-
+      // 한 번도 스냅샷에 없던 신규 종목은 기준점 제외
+      if(!appearsInAnySnap.has(a.id)) return;
       const prev=a.prevPrice||a.currentPrice||0;
       const qty=a.quantity||1;
       let krw=0;
