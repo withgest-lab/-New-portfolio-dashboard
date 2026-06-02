@@ -1283,6 +1283,7 @@ function executeTrade(){
     }
     resetBuyForm();
     saveAssets();renderAll();
+    saveSnap(true); // 매수 시점 수동 스냅샷 (압축 제외)
     return;
   }
 
@@ -1294,6 +1295,7 @@ function executeTrade(){
     const sym = CUR_SYM[a.currency];
     if(sellQty===a.quantity){
       assets = assets.filter(x=>x.id!==assetId);
+      selectedAssets.delete(assetId); saveChartSel();
       if(st){ st.innerHTML=`✅ ${a.name} 전량 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.innerHTML='';},3000); }
     } else {
       a.quantity -= sellQty;
@@ -1301,6 +1303,7 @@ function executeTrade(){
     }
     resetSellForm();
     saveAssets();renderAll();
+    saveSnap(true); // 매도 시점 수동 스냅샷 (압축 제외)
     return;
   }
 
@@ -1330,10 +1333,15 @@ function executeTrade(){
     a.avgPrice  = Math.round(newAvg*100)/100;
     a.quantity += qty;
   } else if(mode==='sell'){
-    if(qty===a.quantity) assets = assets.filter(x=>x.id!==id);
-    else a.quantity -= qty;
+    if(qty===a.quantity){
+      assets = assets.filter(x=>x.id!==id);
+      selectedAssets.delete(id); saveChartSel();
+    } else {
+      a.quantity -= qty;
+    }
   }
   saveAssets();renderAll();
+  saveSnap(true); // 빠른 매수/매도 시점 수동 스냅샷 (압축 제외)
   setTimeout(()=>{ quickTradeId=null; editingId=null; renderTable(); }, 1500);
 }
 
@@ -1973,24 +1981,25 @@ function buildSnapshotHistory(period){
   const nowByAsset=Object.fromEntries(assets.map(a=>[a.id,Math.round(evKRW(a))]));
   const nowTotal=totalEv();
 
-  // 전체 스냅샷(기간 무관)에서 등장한 적 있는 종목 ID (신규/삭제 종목 판별용)
-  const appearsInAnySnap = new Set(allSnaps.flatMap(s=>Object.keys(s.byAsset||{})));
+  // 기간 시작 이전 스냅샷에 있던 종목만 "기존 종목"으로 간주
+  // → 기간 내에 새로 등장한 종목은 신규 종목으로 처리
+  const snapsBeforeStart = allSnaps.filter(s=>s.timestamp<startTs);
+  const existsBeforeStart = new Set(snapsBeforeStart.flatMap(s=>Object.keys(s.byAsset||{})));
 
+  // 스냅샷 byAsset 반환 (byAsset 없는 구형은 현재 기존 종목만으로 추정)
   function snapToByAsset(s){
-    // byAsset이 있으면 그대로 사용 (가장 정확)
     if(s.byAsset&&Object.keys(s.byAsset).length>0) return{...s.byAsset};
-    // byAsset 없는 구형 스냅샷: 현재 종목 비율로 추정
-    // 신규 종목(스냅샷에 한 번도 없던)은 제외
     const scale=nowTotal>0?s.totalValue/nowTotal:1;
     const result={};
     assets.forEach(a=>{
       if(a.category==='cash') return;
-      if(!appearsInAnySnap.has(a.id)) return;
+      if(!existsBeforeStart.has(a.id)) return; // 신규 종목 제외
       result[a.id]=Math.round(evKRW(a)*scale);
     });
     return result;
   }
 
+  // 1D 가상 기준점: 기간 시작 이전에 있던 종목만 prevPrice 기준으로 포함
   function makePrevBaseByAsset(){
     const result={};
     let total=0;
@@ -2000,8 +2009,8 @@ function buildSnapshotHistory(period){
         total+=result[a.id];
         return;
       }
-      // 한 번도 스냅샷에 없던 신규 종목은 기준점 제외
-      if(!appearsInAnySnap.has(a.id)) return;
+      // 기간 시작 전 스냅샷에 없던 종목은 기준점 제외 → 첫 등장 시점부터 0% 시작
+      if(!existsBeforeStart.has(a.id)) return;
       const prev=a.prevPrice||a.currentPrice||0;
       const qty=a.quantity||1;
       let krw=0;
@@ -2017,22 +2026,15 @@ function buildSnapshotHistory(period){
   const history=[];
 
   if(period==='1D'){
-    // 1D: 전일 정규장 종가 기반 가상 기준점
-    // 현금은 각 스냅샷 시점의 현금값을 그대로 사용 (매수/매도 시 변동 반영)
-    // 단, 기준점의 현금값은 현재 현금값으로 고정 → 항상 0%에서 시작
     const base=makePrevBaseByAsset();
-    // 현금 기준값을 현재값으로 고정 (0% 시작)
+    // 현금은 현재값 고정 → 항상 0%
     assets.forEach(a=>{
-      if(a.category==='cash'){
-        base.byAsset[a.id] = Math.round(evKRW(a));
-      }
+      if(a.category==='cash') base.byAsset[a.id]=Math.round(evKRW(a));
     });
     history.push({ts:startTs, byAsset:base.byAsset, total:base.total, isBase:true});
-    // 기간 내 스냅샷 추가
     snaps.forEach(s=>history.push({ts:s.timestamp,byAsset:snapToByAsset(s),total:s.totalValue}));
   } else {
-    const beforeStart=allSnaps.filter(s=>s.timestamp<startTs&&s.totalValue>0).sort((a,b)=>b.timestamp-a.timestamp)[0];
-    // 데이터 없으면 현재값 수평선
+    const beforeStart=snapsBeforeStart.sort((a,b)=>b.timestamp-a.timestamp)[0];
     if(!snaps.length&&!beforeStart){
       return[{ts:Date.now()-1000,byAsset:nowByAsset,total:nowTotal},{ts:Date.now(),byAsset:nowByAsset,total:nowTotal}];
     }
@@ -2045,7 +2047,6 @@ function buildSnapshotHistory(period){
     }
   }
 
-  // 현재 시점 추가: 삭제된 종목은 자연스럽게 null로 처리됨 (nowByAsset에 없음)
   history.push({ts:Date.now(),byAsset:nowByAsset,total:nowTotal});
   return history;
 }
