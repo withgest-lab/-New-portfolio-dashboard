@@ -2112,14 +2112,11 @@ function drawLineChart(){
     // 현금은 그래프에서 제외
     if(a.category==='cash') return;
 
-    // 기준값 결정:
-    // - 1D 가상 기준점(isBase)에 이 종목이 있으면 → 그걸 기준(0%)
-    // - 가상 기준점에 없으면(오늘 신규 매수) → 첫 등장 시점을 기준(0%)
-    const basePoint = chartHistory[0];
-    const hasBase = currentPeriod==='1D' && basePoint?.isBase && (basePoint.byAsset[a.id]??0) > 0;
-    const fv = hasBase ? (basePoint.byAsset[a.id] || raw[fi] || 1) : (raw[fi] || 1);
-    // 신규 종목은 첫 등장 전 구간 null 처리
-    const startIdx = hasBase ? 0 : fi;
+    // 기준값: 항상 첫 등장 시점(fi)을 0%로
+    // - 기간 시작점에 값 있으면 → 그 값 기준
+    // - 신규 종목처럼 중간에 등장하면 → 첫 등장 시점 기준, 그 이전은 null
+    const fv = raw[fi] || 1;
+    const startIdx = fi; // fi 이전은 null → 그래프에 안 그려짐
 
     const pct=raw.map((v,idx)=>idx<startIdx?null:(v!=null?((v-fv)/fv)*100:null));
     const events=[];
