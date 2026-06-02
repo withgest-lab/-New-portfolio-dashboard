@@ -2039,12 +2039,17 @@ function buildSnapshotHistory(period){
       if(a.category==='cash'){
         baseKRW = evKRW(a);
       } else {
-        // 전일 종가 기준 (없으면 매수가 사용)
-        const basePrice = (a.prevPrice && a.prevPrice !== a.currentPrice)
-          ? a.prevPrice : a.avgPrice;
-        baseKRW = a.currency==='USD' ? basePrice * FX.USD * qty
-                : a.currency==='JPY' ? basePrice * FX.JPY * qty
-                : basePrice * qty;
+        // 전일 종가(prevPrice)가 현재가와 다르면 기존 종목 → prevPrice 기준
+        // prevPrice === currentPrice 이면 당일 매수 신규 종목 → 기준점 제외(null)
+        if(a.prevPrice && a.prevPrice !== a.currentPrice){
+          const basePrice = a.prevPrice;
+          baseKRW = a.currency==='USD' ? basePrice * FX.USD * qty
+                  : a.currency==='JPY' ? basePrice * FX.JPY * qty
+                  : basePrice * qty;
+        } else {
+          // 신규 종목: 22:30 가상 기준점에 포함하지 않음 → 첫 스냅샷부터 시작
+          return;
+        }
       }
       byAsset[a.id] = Math.round(baseKRW);
       byQty[a.id]   = qty;
