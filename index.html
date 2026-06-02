@@ -2156,10 +2156,16 @@ function drawLineChart(){
   const lines=[];
 
   if(showSum){
-    // 합계: chartHistory[0] 기준 (가상 기준점 합산)
+    // 합계: prevPrice 기반 기준값 (스냅샷 초기화 후에도 정확)
     const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    const fvSum = rawSum.find(v=>v>0) || 1;
-    const sumVals = rawSum.map(v=> v!=null&&v>0 ? ((v-fvSum)/fvSum)*100 : null);
+    const baseTotalKRW = assets.reduce((s,a)=>{
+      if(a.category==='cash') return s + evKRW(a);
+      const qty = a.quantity || 1;
+      const bp  = a.prevPrice || a.currentPrice;
+      return s + (a.currency==='USD' ? bp*FX.USD*qty
+               : a.currency==='JPY' ? bp*FX.JPY*qty : bp*qty);
+    }, 0) || rawSum.find(v=>v>0) || 1;
+    const sumVals = rawSum.map(v=> v!=null&&v>0 ? ((v-baseTotalKRW)/baseTotalKRW)*100 : null);
     lines.push({label:'합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
@@ -2485,12 +2491,16 @@ function renderStatBar(){
     if(!a){
       // 합계: drawLineChart와 동일한 fvSum 기준
       const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-      const fvSum = rawSum.find(v=>v>0) || 1;
-      const last = rawSum[rawSum.length-1] || fvSum;
+      const fvSum2 = assets.reduce((s,a)=>{
+        if(a.category==='cash') return s + evKRW(a);
+        const qty = a.quantity||1, bp = a.prevPrice||a.currentPrice;
+        return s + (a.currency==='USD'?bp*FX.USD*qty:a.currency==='JPY'?bp*FX.JPY*qty:bp*qty);
+      }, 0) || rawSum.find(v=>v>0) || 1;
+      const last = rawSum[rawSum.length-1] || fvSum2;
       const validRaw = rawSum.filter(v=>v>0);
       const hi = Math.max(...validRaw), lo = Math.min(...validRaw);
-      const pct = ((last - fvSum) / fvSum) * 100;
-      const diff = last - fvSum;
+      const pct = ((last - fvSum2) / fvSum2) * 100;
+      const diff = last - fvSum2;
       return '<div class="stat-item">'+
         '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
         '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
@@ -2534,9 +2544,6 @@ function renderStatBar(){
   }).join('')+'</div>';
 }
 
-  // 전체 선택 = 모든 종목 + 합계 모두 켜진 상태
-  const allSelected = assets.every(a=>selectedAssets.has(a.id)) && showSum;
-  document.getElementById('assetToggles').innerHTML=
 function renderToggles(){
   const allSelected=assets.every(a=>selectedAssets.has(a.id))&&showSum;
   document.getElementById('assetToggles').innerHTML=
