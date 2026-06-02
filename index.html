@@ -654,30 +654,29 @@ function saveAssets(){localStorage.setItem(ASSETS_KEY,JSON.stringify(assets));}
    야후 파이낸스 시세 조회
 ════════════════════════════════════════ */
 const PROXIES = [
-  'https://corsproxy.io/?',
-  'https://api.allorigins.win/raw?url=',
-  'https://thingproxy.freeboard.io/fetch/',
+  'https://api.allorigins.win/raw?url=',  // 가장 안정적
   'https://proxy.cors.sh/',
-  'https://cors-anywhere.herokuapp.com/',
+  'https://corsproxy.io/?',
 ];
 
 async function yahooFetch(url){
-  for(const proxy of PROXIES){
-    try{
-      const res = await fetch(proxy+encodeURIComponent(url),{
-        signal:AbortSignal.timeout(6000),
-        headers:{'User-Agent':'Mozilla/5.0'}
-      });
-      if(!res.ok) continue;
-      const text = await res.text();
-      // allorigins는 {contents:"..."} 형태
-      let json;
-      try{ json=JSON.parse(text); }catch(e){ continue; }
-      if(json?.contents) try{ json=JSON.parse(json.contents); }catch(e){}
-      if(json?.chart?.result?.[0]?.meta) return json;
-    }catch(e){continue;}
-  }
-  return null;
+  // 프록시 병렬 시도 → 가장 빠른 응답 사용
+  const tryProxy = async (proxy) => {
+    const res = await fetch(proxy+encodeURIComponent(url),{
+      signal:AbortSignal.timeout(8000),
+      headers:{'User-Agent':'Mozilla/5.0'}
+    });
+    if(!res.ok) throw new Error('not ok');
+    const text = await res.text();
+    let json;
+    try{ json=JSON.parse(text); }catch(e){ throw new Error('parse fail'); }
+    if(json?.contents) try{ json=JSON.parse(json.contents); }catch(e){}
+    if(!json?.chart?.result?.[0]?.meta) throw new Error('no meta');
+    return json;
+  };
+  try{
+    return await Promise.any(PROXIES.map(p=>tryProxy(p)));
+  }catch(e){ return null; }
 }
 
 // ── 미국 장 상태 (시간 기반 폴백) ──
@@ -690,57 +689,58 @@ function isKoreanTicker(ticker){
 }
 
 async function fetchNaver(ticker){
-  // 005930.KS → 005930, 381180 → 381180
   const code = ticker.replace(/\.(KS|KQ|KN)$/i,'').trim();
-  const urls = [
+  const naverUrls = [
     `https://m.stock.naver.com/api/stock/${code}/basic`,
     `https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`,
   ];
-  for(const naverUrl of urls){
-    for(const proxy of PROXIES){
-      try{
-        const res = await fetch(proxy+encodeURIComponent(naverUrl),{
-          signal:AbortSignal.timeout(6000),
-          headers:{'User-Agent':'Mozilla/5.0'}
-        });
-        if(!res.ok) continue;
-        const text = await res.text();
-        let json;
-        try{ json=JSON.parse(text); }catch(e){ continue; }
-        if(json?.contents) try{ json=JSON.parse(json.contents); }catch(e){}
 
-        const price = json?.closePrice
-          ? parseInt(String(json.closePrice).replace(/,/g,''))
-          : json?.nv
-          ? parseInt(String(json.nv).replace(/,/g,''))
-          : json?.stockItemTotal?.closePrice
-          ? parseInt(String(json.stockItemTotal.closePrice).replace(/,/g,''))
-          : 0;
+  const parsePrice = (json) => {
+    if(!json) throw new Error('no json');
+    if(json?.contents) try{ json=JSON.parse(json.contents); }catch(e){}
+    const price = json?.closePrice
+      ? parseInt(String(json.closePrice).replace(/,/g,''))
+      : json?.nv
+      ? parseInt(String(json.nv).replace(/,/g,''))
+      : json?.stockItemTotal?.closePrice
+      ? parseInt(String(json.stockItemTotal.closePrice).replace(/,/g,''))
+      : 0;
+    if(price<=0) throw new Error('no price');
 
-        // 전일 종가: 여러 필드명 시도
-        // compareToPreviousClosePrice = 전일比 변동액
-        // stockEndPrice / ov = 전일 종가 직접
-        let prev = 0;
-        if(json?.stockEndPrice)
-          prev = parseInt(String(json.stockEndPrice).replace(/,/g,''));
-        else if(json?.ov)
-          prev = parseInt(String(json.ov).replace(/,/g,''));
-        else if(json?.compareToPreviousClosePrice && price>0){
-          // 전일比 변동액으로 역산
-          const chg = parseFloat(String(json.compareToPreviousClosePrice).replace(/,/g,''));
-          prev = price - chg;
-        } else if(json?.stockItemTotal?.compareToPreviousClosePrice && price>0){
-          const chg = parseFloat(String(json.stockItemTotal.compareToPreviousClosePrice).replace(/,/g,''));
-          prev = price - chg;
-        }
-
-        if(price>0){
-          return{ok:true, price, prev:prev>0?prev:price, regularPrice:price};
-        }
-      }catch(e){continue;}
+    let prev = 0;
+    if(json?.stockEndPrice)
+      prev = parseInt(String(json.stockEndPrice).replace(/,/g,''));
+    else if(json?.ov)
+      prev = parseInt(String(json.ov).replace(/,/g,''));
+    else if(json?.compareToPreviousClosePrice && price>0){
+      const chg = parseFloat(String(json.compareToPreviousClosePrice).replace(/,/g,''));
+      prev = price - chg;
+    } else if(json?.stockItemTotal?.compareToPreviousClosePrice && price>0){
+      const chg = parseFloat(String(json.stockItemTotal.compareToPreviousClosePrice).replace(/,/g,''));
+      prev = price - chg;
     }
+    return {ok:true, price, prev:prev>0?prev:price, regularPrice:price};
+  };
+
+  // 모든 URL × 프록시 조합 병렬 시도 → 가장 빠른 성공 응답 사용
+  const combos = naverUrls.flatMap(naverUrl =>
+    PROXIES.map(proxy => async () => {
+      const res = await fetch(proxy+encodeURIComponent(naverUrl),{
+        signal:AbortSignal.timeout(8000),
+        headers:{'User-Agent':'Mozilla/5.0'}
+      });
+      if(!res.ok) throw new Error('not ok');
+      const text = await res.text();
+      let json; try{ json=JSON.parse(text); }catch(e){ throw new Error('parse'); }
+      return parsePrice(json);
+    })
+  );
+
+  try{
+    return await Promise.any(combos.map(fn=>fn()));
+  }catch(e){
+    return {ok:false};
   }
-  return{ok:false};
 }
 
 async function fetchYahoo(ticker){
