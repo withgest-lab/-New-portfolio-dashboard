@@ -1999,11 +1999,14 @@ function getPeriodStart(period){
 // 2순위: 스냅샷 이력이 비어있을 때(초기화 후) → prevPrice < currentPrice * 0.99 이면 기존 종목
 //        (즉, 오늘 매수해서 prevPrice ≈ avgPrice ≈ currentPrice인 경우만 신규)
 function isNewAsset(a, existingIds){
+  // 1순위: 스냅샷 이력 기반 (가장 정확)
   if(existingIds.size > 0) return !existingIds.has(a.id);
-  // 스냅샷 없음: prevPrice가 currentPrice와 많이 다르면 기존 종목
-  if(!a.prevPrice) return true;
-  const diff = Math.abs(a.prevPrice - a.currentPrice) / a.currentPrice;
-  return diff < 0.001; // 0.1% 이내면 당일 신규 매수로 판별
+  // 2순위: 스냅샷 없을 때 → avgPrice vs prevPrice 차이로 판별
+  // avgPrice ≈ prevPrice (10% 이내) → 오늘 매수한 신규 종목
+  // avgPrice << prevPrice (10% 이상 차이) → 오래전부터 보유한 기존 종목
+  if(!a.prevPrice || !a.avgPrice) return true;
+  const diff = Math.abs(a.prevPrice - a.avgPrice) / a.avgPrice;
+  return diff < 0.10; // 10% 이내면 오늘 매수 신규 종목
 }
 
 // 22:30 기준점용: USD 기존 종목만
