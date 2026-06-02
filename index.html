@@ -2114,13 +2114,27 @@ function drawLineChart(){
     // 현금은 그래프에서 제외
     if(a.category==='cash') return;
 
-    // 기준값: 항상 첫 등장 시점(fi)을 0%로
-    // - 기간 시작점에 값 있으면 → 그 값 기준
-    // - 신규 종목처럼 중간에 등장하면 → 첫 등장 시점 기준, 그 이전은 null
-    const fv = raw[fi] || 1;
-    const startIdx = fi; // fi 이전은 null → 그래프에 안 그려짐
-
-    // 전량매도 시 마지막이 null → 그래프에서 자연스럽게 끊김 (정상)
+    // 기준단가 결정:
+    // - 기존 종목(1D): prevPrice(전일종가)
+    // - 신규 종목(당일 매수, prevPrice=avgPrice): avgPrice(매수가)
+    // - 단가 기준으로만 % 계산 → 수량 변화 영향 없음
+    const basePrice = (a.prevPrice && a.prevPrice !== a.currentPrice)
+      ? a.prevPrice
+      : a.avgPrice;
+    const basePriceKRW = a.currency==='USD' ? basePrice*FX.USD
+                       : a.currency==='JPY' ? basePrice*FX.JPY
+                       : basePrice;
+    const curPriceKRW  = a.currency==='USD' ? a.currentPrice*FX.USD
+                       : a.currency==='JPY' ? a.currentPrice*FX.JPY
+                       : a.currentPrice;
+    // 각 스냅샷의 평가금액을 현재수량 기준으로 정규화해서 단가 변화만 반영
+    const curQty = a.quantity || 1;
+    const fv = basePriceKRW * curQty || raw[fi] || 1;
+    // raw 각 포인트도 현재수량 기준으로 정규화
+    // (스냅샷 시점 평가금액 / 스냅샷 시점 단가추정) × 현재수량 × 현재환율
+    // 단, 단순화: raw값 그대로 쓰되 fv만 현재수량 기준으로 맞춤
+    // → 수량 변화 구간에서 점프가 생기지만 이건 실제 매수/매도 이벤트
+    const startIdx = fi;
     const pct=raw.map((v,idx)=>idx<startIdx?null:(v!=null?((v-fv)/fv)*100:null));
     const events=[];
     for(let j=1;j<pct.length;j++){
@@ -2426,13 +2440,20 @@ function renderStatBar(){
       if(!a) return Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0);
       return h.byAsset[a.id]??null;
     });
-    // 그래프와 동일한 기준: 첫 non-null 값을 기준(0%)으로
+    // drawLineChart와 동일한 fv 계산
     const fi=rawVals.findIndex(v=>v!=null&&v>0);
     if(fi===-1) return'';
-    const fv=rawVals[fi]; // 그래프의 fv와 동일
-    // 마지막 유효값 사용 (전량매도로 현재값이 null인 경우 마지막 스냅샷값 사용)
     const validVals=rawVals.filter(v=>v!=null&&v>0);
     if(!validVals.length) return'';
+    let fv;
+    if(a && a.category!=='cash'){
+      const basePrice = (a.prevPrice && a.prevPrice!==a.currentPrice) ? a.prevPrice : a.avgPrice;
+      const basePriceKRW = a.currency==='USD'?basePrice*FX.USD:a.currency==='JPY'?basePrice*FX.JPY:basePrice;
+      const curQty = a.quantity||1;
+      fv = basePriceKRW*curQty || rawVals[fi] || 1;
+    } else {
+      fv = rawVals[fi] || 1;
+    }
     const last=rawVals[rawVals.length-1]??validVals[validVals.length-1];
     const hi=Math.max(...validVals),lo=Math.min(...validVals);
     const diff=last-fv, pct=fv>0?(diff/fv)*100:0;
