@@ -2026,9 +2026,10 @@ function buildSnapshotHistory(period){
   // 1D: prevPrice 기반 가상 기준점 생성
   // → 스냅샷이 없거나 22:30 이전 스냅샷이 없어도 전일 종가 기준으로 0% 시작
   function makePrevBasePoint(){
-    // 1D 가상 기준점:
-    // - 미국(USD): prevPrice(어제 정규장 종가) 기준 → 미국장 변화량 반영
-    // - 한국/일본/현금: currentPrice 기준 → 오늘 장 끝났으므로 0% 수평 유지
+    // 1D 가상 기준점: 모든 종목 prevPrice(전일 정규장 종가) 기준
+    // - 미국: 어제 정규장 종가 → 미국장 변화량 반영
+    // - 한국/일본: 어제 정규장 종가 → 오늘 한국/일본장 변화량 반영
+    // - 현금: 현재값 그대로 (변동 없음)
     const byAsset = {};
     const byQty   = {};
     let total = 0;
@@ -2037,14 +2038,13 @@ function buildSnapshotHistory(period){
       let baseKRW;
       if(a.category==='cash'){
         baseKRW = evKRW(a);
-      } else if(a.currency==='USD'){
-        // 미국: 전일 종가 기준
+      } else {
+        // 전일 종가 기준 (없으면 매수가 사용)
         const basePrice = (a.prevPrice && a.prevPrice !== a.currentPrice)
           ? a.prevPrice : a.avgPrice;
-        baseKRW = basePrice * FX.USD * qty;
-      } else {
-        // 한국/일본: 현재가 기준 → 0% 수평
-        baseKRW = evKRW(a);
+        baseKRW = a.currency==='USD' ? basePrice * FX.USD * qty
+                : a.currency==='JPY' ? basePrice * FX.JPY * qty
+                : basePrice * qty;
       }
       byAsset[a.id] = Math.round(baseKRW);
       byQty[a.id]   = qty;
