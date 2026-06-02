@@ -193,7 +193,6 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     <button class="btn btn-green" onclick="fetchAllPrices(false)">🔄 시세 갱신</button>
     <button class="btn btn-primary" onclick="saveSnap(true)">📸 스냅샷</button>
     <button class="btn btn-sheets" onclick="openBackupModal()">💾 백업 / 복원</button>
-    <button class="btn" style="background:#ff3b3020;color:#ff3b30;font-size:11px;padding:6px 10px;" onclick="showDebugInfo()">🔍 디버그</button>
   </div>
 </div>
 
@@ -424,7 +423,6 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
 </div>
 
 <!-- 드라이브 백업 모달 -->
-<div id="debugOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);color:#0f0;font-family:monospace;font-size:11px;padding:16px;z-index:9999;overflow:auto;white-space:pre-wrap;"></div>
 <div class="modal-bg" id="sheetsModal">
   <div class="modal-box" style="max-width:400px;position:relative;">
     <div style="font-size:16px;font-weight:700;margin-bottom:8px;">💾 백업 / 복원</div>
@@ -2066,41 +2064,6 @@ async function buildChartHistory(){
   renderStatBar();
 }
 
-function showDebugInfo(){
-  // 신규 종목 찾기 (기간 시작 전 스냅샷에 없는 종목)
-  const allSnaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
-  const start = getPeriodStart(currentPeriod);
-  const startTs = start.getTime();
-  const snapsBeforeStart = allSnaps.filter(s=>s.timestamp<startTs);
-  const existsBeforeStart = new Set(snapsBeforeStart.flatMap(s=>Object.keys(s.byAsset||{})));
-
-  let lines = ['=== 디버그 정보 ==='];
-  lines.push(`기간: ${currentPeriod} | 기준시각: ${start.toLocaleString('ko-KR')}`);
-  lines.push(`기준 전 스냅샷 수: ${snapsBeforeStart.length}`);
-  lines.push(`chartHistory 포인트 수: ${chartHistory.length}`);
-  lines.push('');
-
-  assets.filter(a=>a.category!=='cash').forEach(a=>{
-    const raw = chartHistory.map(h=>h.byAsset[a.id]??null);
-    const fi  = raw.findIndex(v=>v!=null&&v>0);
-    const fv  = fi>=0 ? raw[fi] : null;
-    const last= raw[raw.length-1] ?? (raw.filter(v=>v!=null&&v>0).slice(-1)[0]);
-    const pct = (fv&&last) ? ((last-fv)/fv*100).toFixed(1)+'%' : 'N/A';
-    const isNew = !existsBeforeStart.has(a.id);
-    lines.push(`[${isNew?'신규':'기존'}] ${a.name}`);
-    lines.push(`  fi=${fi} fv=${fv?Math.round(fv/10000)+'만':null} last=${last?Math.round(last/10000)+'만':null} → ${pct}`);
-    lines.push(`  raw: ${raw.map(v=>v?Math.round(v/10000)+'만':'null').join(' → ')}`);
-  });
-
-  const msg = lines.join('
-');
-  // 화면에 표시
-  const el = document.getElementById('debugOverlay');
-  if(el){
-    el.style.display = el.style.display==='none' ? 'block' : 'none';
-    el.textContent = msg;
-  }
-}
 
 function drawLineChart(){
   const cv=document.getElementById('lineChart');
