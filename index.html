@@ -632,17 +632,28 @@ async function fetchNaver(ticker){
 }
 
 async function fetchYahoo(ticker){
-  for(const host of ['query1','query2']){
+  // query1/query2 × 프록시 3개 병렬 시도 → 가장 빠른 응답 사용
+  const tryCombo = async (host, proxy) => {
     const url=`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
-    const json = await yahooFetch(url);
+    const res = await fetch(proxy+encodeURIComponent(url),{
+      signal:AbortSignal.timeout(8000),
+      headers:{'User-Agent':'Mozilla/5.0'}
+    });
+    if(!res.ok) throw new Error('not ok');
+    const text = await res.text();
+    let json; try{ json=JSON.parse(text); }catch(e){ throw new Error('parse'); }
+    if(json?.contents) try{ json=JSON.parse(json.contents); }catch(e){}
     const meta = json?.chart?.result?.[0]?.meta;
-    if(meta&&meta.regularMarketPrice>0){
-      const regularPrice= meta.regularMarketPrice;
-      const prev        = meta.chartPreviousClose||meta.previousClose||regularPrice;
-      return{ok:true, price:regularPrice, prev, regularPrice, marketState:'REGULAR'};
-    }
-  }
-  return{ok:false};
+    if(!meta?.regularMarketPrice) throw new Error('no price');
+    const regularPrice = meta.regularMarketPrice;
+    const prev = meta.chartPreviousClose||meta.previousClose||regularPrice;
+    return {ok:true, price:regularPrice, prev, regularPrice, marketState:'REGULAR'};
+  };
+  try{
+    return await Promise.any(
+      ['query1','query2'].flatMap(host => PROXIES.map(proxy => tryCombo(host, proxy)))
+    );
+  }catch(e){ return {ok:false}; }
 }
 
 // 종목 시세 조회: 한국 → 네이버 우선 → 야후 폴백 / 미국/일본 → 야후 프록시
