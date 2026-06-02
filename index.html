@@ -2192,8 +2192,22 @@ function drawLineChart(){
 
   if(showSum){
     const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    const fvSum = rawSum.find(v=>v>0) || 1;
-    const sumVals = rawSum.map(v=> v>0 ? ((v-fvSum)/fvSum)*100 : null);
+    // fvSum: 현재 총평가금액과 같은 규모의 기준값
+    // chartHistory 마지막(현재값)을 기준으로 역산해서
+    // 각 종목 prevPrice 기반 기준값 합산 사용
+    const nowTotal = rawSum[rawSum.length-1] || 1;
+    // 기준 합계 = 각 종목 기준단가 × 수량 합산
+    // (신규종목은 현재가 기준으로 포함 → 0% 기여)
+    const baseTotalKRW = assets.reduce((s,a)=>{
+      if(a.category==='cash') return s + evKRW(a);
+      const qty = a.quantity || 1;
+      const basePrice = a.prevPrice || a.currentPrice;
+      const baseKRW = a.currency==='USD' ? basePrice*FX.USD*qty
+                    : a.currency==='JPY' ? basePrice*FX.JPY*qty
+                    : basePrice*qty;
+      return s + baseKRW;
+    }, 0) || nowTotal;
+    const sumVals = rawSum.map(v=> v>0 ? ((v-baseTotalKRW)/baseTotalKRW)*100 : null);
     lines.push({label:'합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
@@ -2526,14 +2540,22 @@ function renderStatBar(){
   bar.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:4px;">'+
   items.map(a=>{
     if(!a){
-      // 합계: 전체 평가금액 기준
+      // 합계: prevPrice 기반 기준값 합산
       const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-      const fvSum = rawSum.find(v=>v>0) || 1;
-      const last = rawSum[rawSum.length-1] || fvSum;
+      const baseTotalKRW = assets.reduce((s,a2)=>{
+        if(a2.category==='cash') return s + evKRW(a2);
+        const qty = a2.quantity || 1;
+        const basePrice = a2.prevPrice || a2.currentPrice;
+        const baseKRW = a2.currency==='USD' ? basePrice*FX.USD*qty
+                      : a2.currency==='JPY' ? basePrice*FX.JPY*qty
+                      : basePrice*qty;
+        return s + baseKRW;
+      }, 0) || (rawSum.find(v=>v>0)||1);
+      const last = rawSum[rawSum.length-1] || baseTotalKRW;
       const validRaw = rawSum.filter(v=>v>0);
       const hi = Math.max(...validRaw), lo = Math.min(...validRaw);
-      const pct = ((last - fvSum) / fvSum) * 100;
-      const diff = last - fvSum;
+      const pct = ((last - baseTotalKRW) / baseTotalKRW) * 100;
+      const diff = last - baseTotalKRW;
       return '<div class="stat-item">'+
         '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
         '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
