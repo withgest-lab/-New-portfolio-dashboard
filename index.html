@@ -192,7 +192,7 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     </div>
     <button class="btn btn-green" onclick="fetchAllPrices(false)">🔄 시세 갱신</button>
     <button class="btn btn-primary" onclick="saveSnap(true)">📸 스냅샷</button>
-    <button class="btn btn-sheets" onclick="openSheetsModal()">📤 구글 시트</button>
+    <button class="btn btn-sheets" onclick="openBackupModal()">💾 백업 / 복원</button>
   </div>
 </div>
 
@@ -422,62 +422,37 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   </div>
 </div>
 
-<!-- 구글 시트 모달 -->
+<!-- 드라이브 백업 모달 -->
 <div class="modal-bg" id="sheetsModal">
   <div class="modal-box" style="max-width:400px;position:relative;">
-    <div style="font-size:16px;font-weight:700;margin-bottom:16px;">📤 구글 시트</div>
+    <div style="font-size:16px;font-weight:700;margin-bottom:8px;">💾 백업 / 복원</div>
+    <button onclick="closeSheetsModal()" style="position:absolute;top:16px;right:16px;border:none;background:none;
+      cursor:pointer;font-size:18px;color:var(--color-tertiary);">✕</button>
 
-    <!-- 탭 -->
-    <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:1px solid var(--color-border);">
-      <button id="stab_sync" onclick="switchSheetsTab('sync')"
-        style="border:none;background:none;cursor:pointer;padding:7px 16px;font-family:inherit;
-               font-size:13px;font-weight:600;color:var(--color-accent);
-               border-bottom:2px solid var(--color-accent);margin-bottom:-1px;">동기화 설정</button>
-      <button id="stab_csv" onclick="switchSheetsTab('csv')"
-        style="border:none;background:none;cursor:pointer;padding:7px 16px;font-family:inherit;
-               font-size:13px;font-weight:600;color:var(--color-tertiary);
-               border-bottom:2px solid transparent;margin-bottom:-1px;">CSV 백업</button>
-    </div>
-
-    <!-- 동기화 설정 -->
-    <div id="stab_sync_form">
-      <div style="font-size:12px;color:var(--color-secondary);margin-bottom:12px;line-height:1.6;">
-        Google Apps Script URL을 입력하면 모바일↔PC 데이터가 자동 동기화됩니다.
+    <!-- 백업 섹션 -->
+    <div style="background:var(--color-surface);border-radius:12px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📥 백업 (JSON 다운로드)</div>
+      <div style="font-size:11px;color:var(--color-secondary);margin-bottom:10px;line-height:1.5;">
+        JSON 파일로 저장 후 구글 드라이브에 수동 업로드하세요.
       </div>
-      <label style="font-size:11px;color:var(--color-tertiary);display:block;margin-bottom:4px;">Apps Script URL</label>
-      <input id="gs_url" type="text" placeholder="https://script.google.com/macros/s/.../exec"
-        style="width:100%;border:1px solid var(--color-border);border-radius:8px;
-               padding:8px 10px;font-size:12px;font-family:inherit;margin-bottom:10px;">
-      <label style="font-size:11px;color:var(--color-tertiary);display:block;margin-bottom:4px;">시크릿 키</label>
-      <input id="gs_key" type="password" placeholder="Apps Script에 설정한 키"
-        style="width:100%;border:1px solid var(--color-border);border-radius:8px;
-               padding:8px 10px;font-size:12px;font-family:inherit;margin-bottom:14px;">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-primary" style="flex:1;" onclick="saveGSyncSettings()">설정 저장</button>
-        <button class="btn" style="background:#34c75920;color:#34c759;flex:1;" onclick="syncFromSheets()">☁️ 불러오기</button>
-        <button class="btn" style="background:#007aff20;color:#007aff;flex:1;" onclick="syncToSheets()">☁️ 저장하기</button>
-      </div>
-      <div id="gs_setup_status" style="font-size:11px;color:var(--color-secondary);margin-top:10px;min-height:16px;"></div>
-      <div style="margin-top:12px;text-align:right;">
-        <button class="btn btn-ghost" onclick="closeSheetsModal()">닫기</button>
-      </div>
-    </div>
-
-    <!-- CSV 백업 -->
-    <div id="stab_csv_form" style="display:none;">
       <label style="font-size:11px;color:var(--color-tertiary);display:block;margin-bottom:4px;">파일 이름</label>
       <input id="sheetsFileName" type="text"
         style="width:100%;border:1px solid var(--color-border);border-radius:8px;
-               padding:8px 10px;font-size:13px;font-family:inherit;margin-bottom:14px;">
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button class="btn btn-ghost" onclick="closeSheetsModal()">취소</button>
-        <button class="btn btn-primary" id="sheetsSaveBtn" onclick="confirmSaveSheets()">CSV 다운로드</button>
-      </div>
+               padding:8px 10px;font-size:13px;font-family:inherit;margin-bottom:10px;box-sizing:border-box;">
+      <button class="btn btn-primary" style="width:100%;" onclick="downloadBackup()">📥 JSON 다운로드</button>
     </div>
 
-    <div id="sheetsStatus" style="font-size:12px;color:var(--color-secondary);margin-top:8px;min-height:18px;"></div>
-    <button onclick="closeSheetsModal()" style="position:absolute;top:16px;right:16px;border:none;background:none;
-      cursor:pointer;font-size:18px;color:var(--color-tertiary);">✕</button>
+    <!-- 복원 섹션 -->
+    <div style="background:var(--color-surface);border-radius:12px;padding:14px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📤 복원 (JSON 불러오기)</div>
+      <div style="font-size:11px;color:var(--color-secondary);margin-bottom:10px;line-height:1.5;">
+        구글 드라이브에서 백업 파일을 선택하면 복원됩니다.
+      </div>
+      <input type="file" id="restoreFileInput" accept=".json" style="display:none;" onchange="restoreFromFile(event)">
+      <button class="btn" style="width:100%;background:#34c75920;color:#34c759;" onclick="document.getElementById('restoreFileInput').click()">📂 JSON 파일 선택</button>
+    </div>
+
+    <div id="sheetsStatus" style="font-size:12px;margin-top:10px;min-height:18px;text-align:center;"></div>
   </div>
 </div>
 
@@ -505,95 +480,8 @@ const CUR_SYM    = {KRW:'₩',USD:'$',JPY:'¥'};
 const SNAP_KEY    = 'pf_snaps_v5';
 const ASSETS_KEY  = 'pf_assets_v1';
 const FX_KEY      = 'pf_fx_v1';
-const GSYNC_KEY   = 'pf_gsync_v1'; // Google Sheets 설정 저장
+// Google Sheets 동기화 제거됨 - 드라이브 직접 백업으로 대체
 
-/* ════════════════════════════════════════
-   Google Sheets 동기화
-════════════════════════════════════════ */
-function loadGSyncConfig(){
-  try{ return JSON.parse(localStorage.getItem(GSYNC_KEY)||'{}'); }catch(e){ return {}; }
-}
-function saveGSyncConfig(cfg){
-  localStorage.setItem(GSYNC_KEY, JSON.stringify(cfg));
-}
-
-// Google Sheets에 데이터 저장
-async function syncToSheets(silent=false){
-  const cfg = loadGSyncConfig();
-  if(!cfg.url||!cfg.key){
-    if(!silent) showSyncStatus('⚠️ Google Sheets 설정이 필요합니다. 📤 구글 시트 버튼을 눌러 설정하세요.','warn');
-    return false;
-  }
-  try{
-    if(!silent) showSyncStatus('☁️ Google Sheets 저장 중...','loading');
-    const data = {
-      assets: assets,
-      fx:     FX,
-      snaps:  loadSnaps(),
-      ts:     Date.now()
-    };
-    const url = `${cfg.url}?action=write&key=${encodeURIComponent(cfg.key)}&data=${encodeURIComponent(JSON.stringify(data))}`;
-    const res = await fetch(url, {signal:AbortSignal.timeout(10000)});
-    const json = await res.json();
-    if(json.ok){
-      if(!silent) showSyncStatus(`✅ Google Sheets 저장 완료 ${new Date().toLocaleTimeString('ko-KR')}`,'ok');
-      return true;
-    } else {
-      if(!silent) showSyncStatus('❌ 저장 실패: '+json.error,'err');
-      return false;
-    }
-  }catch(e){
-    if(!silent) showSyncStatus('❌ 연결 실패: '+e.message,'err');
-    return false;
-  }
-}
-
-// Google Sheets에서 데이터 불러오기
-async function syncFromSheets(silent=false){
-  const cfg = loadGSyncConfig();
-  if(!cfg.url||!cfg.key) return false;
-  try{
-    if(!silent) showSyncStatus('☁️ Google Sheets 불러오는 중...','loading');
-    const url = `${cfg.url}?action=read&key=${encodeURIComponent(cfg.key)}`;
-    const res = await fetch(url, {signal:AbortSignal.timeout(10000)});
-    const json = await res.json();
-    if(json.ok && json.assets && json.assets.length){
-      // 더 최신 데이터인지 확인
-      const localTs  = parseInt(localStorage.getItem('pf_last_sync')||'0');
-      const remoteTs = json.ts || 0;
-      if(remoteTs > localTs){
-        assets = json.assets;
-        if(json.fx && json.fx.USD > 1000) FX = json.fx;
-        if(json.snaps && json.snaps.length) saveSnaps(json.snaps);
-        saveAssets(); saveFX();
-        localStorage.setItem('pf_last_sync', remoteTs);
-        renderAll(); renderSnaps();
-        if(!silent) showSyncStatus(`✅ 최신 데이터 불러옴 (${new Date(remoteTs).toLocaleTimeString('ko-KR')})`,'ok');
-        return true;
-      } else {
-        if(!silent) showSyncStatus('✅ 이미 최신 데이터입니다.','ok');
-        return false;
-      }
-    }
-    return false;
-  }catch(e){
-    if(!silent) showSyncStatus('❌ 불러오기 실패: '+e.message,'err');
-    return false;
-  }
-}
-
-function showSyncStatus(msg, state='ok'){
-  setStatus(state, msg);
-  if(state==='ok') setTimeout(()=>setStatus('ok', document.getElementById('statusText').textContent===''+msg?'':document.getElementById('statusText').textContent), 4000);
-}
-
-// 데이터 변경 시 자동 Sheets 동기화
-async function saveAndSync(){
-  saveAssets();
-  renderAll();
-  await syncToSheets(true); // 조용히 백그라운드 저장
-  localStorage.setItem('pf_last_sync', Date.now());
-}
 
 /* ETF 브랜드 판별 */
 const ETF_BRANDS = /^(TIGER|KODEX|KINDEX|ARIRANG|HANARO|KBSTAR|ACE|SOL|TIMEFOLIO)/i;
@@ -757,44 +645,7 @@ async function fetchYahoo(ticker){
   return{ok:false};
 }
 
-// Apps Script 경유 시세 조회 (미국/일본 주식용)
-// 구글 서버에서 야후 직접 호출 → CORS/차단 없음
-async function fetchPriceViaAppsScript(tickers){
-  const cfg = loadGSyncConfig();
-  if(!cfg.url||!cfg.key){
-    console.warn('Apps Script URL/KEY 없음');
-    return {};
-  }
-  try{
-    const params = new URLSearchParams({
-      action: 'price',
-      key:    cfg.key,
-      tickers: tickers.join(','),
-    });
-    const url = `${cfg.url}?${params}`;
-    console.log('[price] 요청 URL:', url.slice(0,100));
-    console.log('[price] key:', cfg.key, '/ tickers:', tickers.join(','));
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    console.log('[price] HTTP status:', res.status);
-    if(!res.ok){ console.warn('[price] HTTP 오류:', res.status); return {}; }
-    const text = await res.text();
-    console.log('[price] 응답 raw:', text.slice(0,300));
-    let json;
-    try{ json=JSON.parse(text); }catch(e){ console.warn('[price] JSON 파싱 실패:', text.slice(0,100)); return {}; }
-    if(!json.ok){ console.warn('[price] 응답 실패:', json.error); return {}; }
-    Object.entries(json.prices||{}).forEach(([t,v])=>{
-      console.log(`  [price] ${t}: price=${v.price}, marketState=${v.marketState}, pre=${v.prePrice}, post=${v.postPrice}, ok=${v.ok}`);
-    });
-    return json.prices||{};
-  }catch(e){
-    console.warn('[price] 예외:', e.message);
-    return {};
-  }
-}
-
-// 종목 시세 조회:
-// 한국(.KS/6자리) → 네이버 우선 → 야후 폴백
-// 미국/일본       → Apps Script(구글서버) 우선 → 야후 프록시 폴백
+// 종목 시세 조회: 한국 → 네이버 우선 → 야후 폴백 / 미국/일본 → 야후 프록시
 async function fetchPrice(ticker){
   if(isKoreanTicker(ticker)){
     const r = await fetchNaver(ticker);
@@ -836,19 +687,8 @@ async function fetchAllPrices(saveSnapshot=false){
 
     const targets=assets.filter(a=>a.ticker&&a.ticker!=='—'&&a.category!=='cash');
 
-    // ★ Apps Script로 전체 티커 배치 조회 (한국/미국/일본 모두)
-    let appsScriptPrices = {};
-    if(targets.length>0){
-      appsScriptPrices = await fetchPriceViaAppsScript(targets.map(a=>a.ticker));
-    }
-
-    // Apps Script 실패한 종목만 개별 폴백 조회
+    // 한국=네이버, 미국/일본=야후 프록시 병렬 조회
     const results=await Promise.allSettled(targets.map(async a=>{
-      // Apps Script 결과 있으면 우선 사용
-      if(appsScriptPrices[a.ticker]?.ok){
-        return {id:a.id, name:a.name, r:appsScriptPrices[a.ticker]};
-      }
-      // 폴백: 한국=네이버, 미국/일본=야후 프록시
       return {id:a.id, name:a.name, r:await fetchPrice(a.ticker)};
     }));
     let ok=0,fail=0;
@@ -1385,7 +1225,7 @@ function executeTrade(){
   // 삭제
   if(mode==='delete'){
     assets = assets.filter(x=>x.id!==id);
-    saveAssets();renderAll();syncToSheets(true);
+    saveAssets();renderAll();
     return;
   }
 
@@ -1394,7 +1234,7 @@ function executeTrade(){
     const a=assets.find(x=>x.id===id); if(!a) return;
     a.avgPrice=trade.newAmt; a.currentPrice=trade.newAmt; a.prevPrice=trade.newAmt;
     editingId=null;
-    saveAssets();renderAll();syncToSheets(true);
+    saveAssets();renderAll();
     return;
   }
 
@@ -1405,7 +1245,7 @@ function executeTrade(){
     if(!isNaN(price)&&price>0) a.avgPrice = price;
     if(trade.cat)              a.category = trade.cat;
     editingId=null; quickTradeId=null;
-    saveAssets();renderAll();syncToSheets(true);
+    saveAssets();renderAll();
     return;
   }
 
@@ -1427,7 +1267,7 @@ function executeTrade(){
       if(st){ st.textContent=`✅ ${name} 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`; setTimeout(()=>{st.textContent='';},3000); }
     }
     resetBuyForm();
-    saveAssets();renderAll();syncToSheets(true);
+    saveAssets();renderAll();
     return;
   }
 
@@ -1445,7 +1285,7 @@ function executeTrade(){
       if(st){ st.innerHTML=`✅ ${a.name} ${sellQty.toLocaleString()}주 매도 · 잔여 ${a.quantity.toLocaleString()}주 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.innerHTML='';},3000); }
     }
     resetSellForm();
-    saveAssets();renderAll();syncToSheets(true);
+    saveAssets();renderAll();
     return;
   }
 
@@ -1463,7 +1303,7 @@ function executeTrade(){
     document.getElementById('cf_name').value='';
     document.getElementById('cf_amount').value='';
     document.getElementById('cf_cur').value='KRW';
-    saveAssets();renderAll();syncToSheets(true);
+    saveAssets();renderAll();
     return;
   }
 
@@ -1478,7 +1318,7 @@ function executeTrade(){
     if(qty===a.quantity) assets = assets.filter(x=>x.id!==id);
     else a.quantity -= qty;
   }
-  saveAssets();renderAll();syncToSheets(true);
+  saveAssets();renderAll();
   setTimeout(()=>{ quickTradeId=null; editingId=null; renderTable(); }, 1500);
 }
 
@@ -1546,7 +1386,7 @@ function saveEdit(id){
   const avg=parseFloat(document.getElementById('ei_avg').value);
   if(!isNaN(qty)&&qty>=0) a.quantity=qty;
   if(!isNaN(avg)&&avg>=0) a.avgPrice=avg;
-  editingId=null;saveAssets();renderAll();syncToSheets(true);
+  editingId=null;saveAssets();renderAll();
 }
 function delAsset(id){
   const a = assets.find(x=>x.id===id);
@@ -2608,105 +2448,74 @@ function toggleAll(){
 }
 
 /* ════════════════════════════════════════
-   구글 시트 CSV 저장
+   구글 드라이브 백업
 ════════════════════════════════════════ */
-function openSheetsModal(){
+function openBackupModal(){
   const today=new Date();
   const ds=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
   document.getElementById('sheetsFileName').value=`포트폴리오-백업-${ds}`;
   document.getElementById('sheetsStatus').textContent='';
-  // 저장된 설정 불러오기
-  const cfg=loadGSyncConfig();
-  if(cfg.url) document.getElementById('gs_url').value=cfg.url;
-  if(cfg.key) document.getElementById('gs_key').value=cfg.key;
   document.getElementById('sheetsModal').classList.add('open');
-  // 설정 있으면 동기화 탭, 없으면 CSV 탭
-  switchSheetsTab(cfg.url?'sync':'csv');
 }
 function closeSheetsModal(){document.getElementById('sheetsModal').classList.remove('open');}
 
-function switchSheetsTab(tab){
-  const isSyncTab = tab==='sync';
-  document.getElementById('stab_sync_form').style.display = isSyncTab?'block':'none';
-  document.getElementById('stab_csv_form').style.display  = isSyncTab?'none':'block';
-  document.getElementById('stab_sync').style.color        = isSyncTab?'var(--color-accent)':'var(--color-tertiary)';
-  document.getElementById('stab_sync').style.borderBottomColor = isSyncTab?'var(--color-accent)':'transparent';
-  document.getElementById('stab_csv').style.color         = isSyncTab?'var(--color-tertiary)':'var(--color-accent)';
-  document.getElementById('stab_csv').style.borderBottomColor  = isSyncTab?'transparent':'var(--color-accent)';
-}
-
-function saveGSyncSettings(){
-  const url = document.getElementById('gs_url').value.trim();
-  const key = document.getElementById('gs_key').value.trim();
-  const st  = document.getElementById('gs_setup_status');
-  if(!url||!key){st.textContent='❌ URL과 키를 모두 입력해 주세요.';return;}
-  saveGSyncConfig({url,key});
-  st.textContent='✅ 설정 저장 완료! 이제 모바일↔PC 동기화가 됩니다.';
-}
-
-function confirmSaveSheets(){
-  const fileName=document.getElementById('sheetsFileName').value.trim()||'포트폴리오-백업';
-  const statusEl=document.getElementById('sheetsStatus');
-  const saveBtn=document.getElementById('sheetsSaveBtn');
+// ── 백업: JSON 다운로드 ──
+function downloadBackup(){
+  const fileName = document.getElementById('sheetsFileName').value.trim()||'포트폴리오-백업';
+  const statusEl = document.getElementById('sheetsStatus');
   try{
-    const total=totalEv(),cost=assets.reduce((s,a)=>s+costKRW(a),0),pnl=total-cost,rtn=cost>0?(pnl/cost)*100:0;
-    const snaps=loadSnaps().slice().sort((a,b)=>a.timestamp-b.timestamp);
-    const now=new Date().toLocaleString('ko-KR');
-    function wonFmt(n){return Math.round(n).toLocaleString('ko-KR')+'원';}
-    function priceFmt(n,cur){
-      if(cur==='USD') return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-      if(cur==='JPY') return '¥'+Math.round(n).toLocaleString('ja-JP');
-      return '₩'+Math.round(n).toLocaleString('ko-KR');
+    const data = {
+      ts:     Date.now(),
+      assets: assets,
+      fx:     FX,
+      snaps:  loadSnaps(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `${fileName}.json`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    statusEl.style.color = '#34c759';
+    statusEl.textContent = `✅ ${fileName}.json 다운로드 완료! 구글 드라이브에 업로드해두세요.`;
+  }catch(e){
+    statusEl.style.color = '#ff3b30';
+    statusEl.textContent = '❌ 오류: '+e.message;
+  }
+}
+
+// ── 복원: JSON 파일 불러오기 ──
+function restoreFromFile(event){
+  const statusEl = document.getElementById('sheetsStatus');
+  const file = event.target.files[0];
+  if(!file){ return; }
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const data = JSON.parse(e.target.result);
+      if(!data.assets || !Array.isArray(data.assets)){
+        throw new Error('올바른 백업 파일이 아닙니다.');
+      }
+      // 복원 확인
+      if(!confirm(`백업 파일(${file.name})로 복원하시겠습니까?\n현재 데이터는 덮어씌워집니다.`)) return;
+
+      assets = data.assets;
+      if(data.fx?.USD > 1000) FX = data.fx;
+      if(data.snaps?.length) saveSnaps(data.snaps);
+      saveAssets(); saveFX();
+      renderAll(); renderSnaps();
+
+      statusEl.style.color = '#34c759';
+      statusEl.textContent = `✅ 복원 완료! (${data.assets.length}개 종목, 스냅샷 ${(data.snaps||[]).length}개)`;
+      setTimeout(()=>closeSheetsModal(), 2000);
+    }catch(err){
+      statusEl.style.color = '#ff3b30';
+      statusEl.textContent = '❌ 복원 실패: '+err.message;
     }
-    function toCSV(rows){return rows.map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\n');}
-    const assetRows=[
-      [`저장시각: ${now}`],[],
-      ['종목명','티커','구분','현재가','평균단가','통화','수량','투자원금','평가금액','평가손익','수익률','전일대비'],
-      ...assets.map(a=>{
-        const ev=evKRW(a),c=costKRW(a),p=ev-c,r=c>0?(p/c)*100:0;
-        const dayChg=a.prevPrice>0?((a.currentPrice-a.prevPrice)/a.prevPrice)*100:0;
-        return[a.name,a.ticker,CAT_LABELS[a.category]||a.category,priceFmt(a.currentPrice,a.currency),
-          priceFmt(a.avgPrice,a.currency),a.currency,a.quantity.toLocaleString('ko-KR'),
-          wonFmt(c),wonFmt(ev),(p>=0?'+':'')+wonFmt(p),(r>=0?'+':'')+r.toFixed(2)+'%',(dayChg>=0?'+':'')+dayChg.toFixed(2)+'%'];
-      }),
-      [],[`','','','','','','합계',wonFmt(cost),wonFmt(total),(pnl>=0?'+':'')+wonFmt(pnl),(rtn>=0?'+':'')+rtn.toFixed(2)+'%','`]
-    ];
-    const catMap={};assets.forEach(a=>{const k=donutCatKey(a);catMap[k]=(catMap[k]||0)+evKRW(a);});
-    const catRows=[[`저장시각: ${now}`],[],['카테고리','평가금액','비중(%)'],
-      ...Object.entries(catMap).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[DONUT_CAT_LABELS[k]||k,wonFmt(v),((v/total)*100).toFixed(2)+'%']),
-      [],['합계',wonFmt(total),'100.00%']
-    ];
-    const assetBiasRows=[[`저장시각: ${now}`],[],['종목명','평가금액','비중(%)'],
-      ...assets.map(a=>({name:a.name,ev:evKRW(a)})).sort((a,b)=>b.ev-a.ev).map(a=>[a.name,wonFmt(a.ev),((a.ev/total)*100).toFixed(2)+'%']),
-      [],['합계',wonFmt(total),'100.00%']
-    ];
-    const snapRows=[['저장시각','총평가금액','전대비변화','변화율'],
-      ...snaps.map((s,i)=>{
-        const prev=snaps[i-1];const diff=prev?s.totalValue-prev.totalValue:null;
-        const pct=prev&&prev.totalValue>0?((diff/prev.totalValue)*100).toFixed(2)+'%':'';
-        return[new Date(s.timestamp).toLocaleString('ko-KR'),wonFmt(s.totalValue),diff!=null?(diff>=0?'+':'')+wonFmt(diff):'',pct];
-      })
-    ];
-    const restoreRows=[['=== 원복 가이드 ==='],['Claude에 이 CSV 업로드 후 "이 CSV로 포트폴리오 대시보드 원복해줘" 요청'],
-      [],['=== 핵심 데이터 ==='],['종목명','티커','통화','수량','평균단가'],
-      ...assets.map(a=>[a.name,a.ticker,a.currency,a.quantity,priceFmt(a.avgPrice,a.currency)])
-    ];
-    const BOM='\uFEFF';
-    const fullCSV=BOM+[
-      '===== 자산목록 =====',toCSV(assetRows),'',
-      '===== 카테고리비중 =====',toCSV(catRows),'',
-      '===== 종목비중 =====',toCSV(assetBiasRows),'',
-      '===== 스냅샷이력 =====',toCSV(snapRows),'',
-      '===== 원복가이드 =====',toCSV(restoreRows),
-    ].join('\n');
-    const blob=new Blob([fullCSV],{type:'text/csv;charset=utf-8;'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=`${fileName}.csv`;
-    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
-    statusEl.innerHTML=`✅ <b>${fileName}.csv</b> 다운로드 완료!<br><span style="font-size:11px;color:var(--color-tertiary)">구글 드라이브 앱 → + → 파일 업로드</span>`;
-    saveBtn.textContent='완료';
-    setTimeout(()=>{closeSheetsModal();saveBtn.textContent='저장';},3000);
-  }catch(e){statusEl.textContent='❌ 오류: '+e.message;}
+    // 파일 input 초기화 (같은 파일 재선택 가능하도록)
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 /* ════════════════════════════════════════
@@ -2854,13 +2663,6 @@ window.addEventListener('resize',()=>drawLineChart());
   fetchIndices();
   // ★ 누락 스냅샷 보완 (페이지 닫혀있던 동안 못 찍은 스냅샷)
   setTimeout(catchUpSnaps, 3000);
-
-  // Google Sheets 설정 있으면 최신 데이터 자동 불러오기
-  const gsCfg = loadGSyncConfig();
-  if(gsCfg.url && gsCfg.key){
-    setStatus('loading','☁️ Google Sheets에서 데이터 불러오는 중...');
-    await syncFromSheets(true);
-  }
 
   // 시세 갱신 + 이상 스냅샷 정리
   fetchAllPrices(false).then(()=>{
