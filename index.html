@@ -1986,15 +1986,21 @@ function buildSnapshotHistory(period){
 
   // 1D: 전일 정규장 종가 기반 가상 기준점 생성
   // 모든 종목을 prevPrice(전일종가) 기준으로 KRW 환산 → 그래프 시작점이 항상 0%
+  // 기간 내 스냅샷에 등장한 적 있는 종목 ID 목록 (신규 종목 판별용)
+  const appearsInSnaps = new Set(snaps.flatMap(s=>Object.keys(s.byAsset||{})));
+
   function makePrevBaseByAsset(){
     const result={};
     let total=0;
     assets.forEach(a=>{
       if(a.category==='cash'){
-        result[a.id]=Math.round(evKRW(a)); // 현금은 현재값 그대로
+        result[a.id]=Math.round(evKRW(a));
         total+=result[a.id];
         return;
       }
+      // 스냅샷에 한 번도 등장하지 않은 신규 종목은 기준점에서 제외 → 첫 등장 시점부터 0% 시작
+      if(!appearsInSnaps.has(a.id)) return;
+
       const prev=a.prevPrice||a.currentPrice||0;
       const qty=a.quantity||1;
       let krw=0;
