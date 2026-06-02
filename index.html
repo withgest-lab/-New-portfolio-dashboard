@@ -2104,23 +2104,18 @@ function drawLineChart(){
 
     const qty = a.quantity || 1;
     const basePriceKRW = getBasePriceKRW(a) || 1; // 기준단가 (KRW)
+    const baseEv = basePriceKRW * qty; // 기준 평가금액
 
-    // 각 히스토리 포인트를 단가로 변환: 평가금액 / 현재수량
-    // → 수량이 달라도 단가 기준으로 통일
-    const raw = chartHistory.map(h=>{
-      const ev = h.byAsset[a.id] ?? null;
-      return ev!=null ? ev : null; // null은 그대로 null
-    });
-
+    const raw = chartHistory.map(h=> h.byAsset[a.id] ?? null);
     const fi = raw.findIndex(v=>v!=null);
     if(fi===-1) return;
 
-    // pct = (스냅샷단가 - 기준단가) / 기준단가 × 100
-    // 스냅샷단가 = raw[i] / qty
+    // pct = (스냅샷 평가금액 - 기준 평가금액) / 기준 평가금액 × 100
+    // 기준 평가금액 = basePriceKRW × 현재수량 (고정값)
+    // → 수량 변화와 무관하게 단가 기준 수익률과 동일
     const pct = raw.map((v,idx)=>{
       if(idx<fi || v==null) return null;
-      const snapPrice = v / qty; // 스냅샷 평가금액 → 단가
-      return ((snapPrice - basePriceKRW) / basePriceKRW) * 100;
+      return ((v - baseEv) / baseEv) * 100;
     });
 
     const events=[];
@@ -2457,22 +2452,21 @@ function renderStatBar(){
     // 일반 종목
     const qty = a.quantity || 1;
     const basePriceKRW = getBasePriceKRW(a) || 1;
+    const baseEv = basePriceKRW * qty;
     const rawVals = chartHistory.map(h=>h.byAsset[a.id]??null);
     const fi = rawVals.findIndex(v=>v!=null);
     if(fi===-1) return '';
 
-    // 단가로 변환한 pct 계산 (drawLineChart와 동일)
+    // pct = (스냅샷 평가금액 - 기준 평가금액) / 기준 평가금액 × 100 (drawLineChart와 동일)
     const pctVals = rawVals.map((v,idx)=>{
       if(idx<fi||v==null) return null;
-      return ((v/qty - basePriceKRW) / basePriceKRW) * 100;
+      return ((v - baseEv) / baseEv) * 100;
     }).filter(v=>v!=null);
     if(!pctVals.length) return '';
 
     const lastRaw = rawVals[rawVals.length-1] ?? rawVals.filter(v=>v!=null).slice(-1)[0];
-    const lastPct = lastRaw!=null ? ((lastRaw/qty - basePriceKRW)/basePriceKRW)*100 : 0;
+    const lastPct = lastRaw!=null ? ((lastRaw - baseEv)/baseEv)*100 : 0;
     const hi = Math.max(...pctVals), lo = Math.min(...pctVals);
-    // 금액 diff: 현재 평가금액 - 기준 평가금액
-    const baseEv = basePriceKRW * qty;
     const lastEv = lastRaw ?? baseEv;
     const diff = lastEv - baseEv;
     const itemColor = LINE_COLS[assets.indexOf(a)%LINE_COLS.length];
