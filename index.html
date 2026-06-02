@@ -1760,10 +1760,21 @@ function renderSummary(){
     todayPnl = ev - baseSnap.totalValue;
     todayPct = (todayPnl / baseSnap.totalValue) * 100;
   } else {
-    // 스냅샷 없으면 prevPrice 기준으로 fallback
-    const prevEv = assets.reduce((s,a) => s + toKRW(a, a.prevPrice) * a.quantity, 0);
-    todayPnl = ev - prevEv;
-    todayPct = prevEv > 0 ? (todayPnl / prevEv) * 100 : 0;
+    // 스냅샷 없으면 그래프 합계와 동일한 baseTotalKRW 기준
+    const allSnapsForPnl = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+    const startTs1Dp = getPeriodStart('1D').getTime();
+    const snapsBeforePnl = allSnapsForPnl.filter(s=>s.timestamp < startTs1Dp);
+    const existIdsPnl = new Set(snapsBeforePnl.flatMap(s=>Object.keys(s.byAsset||{})));
+    const baseEv = assets.reduce((s,a)=>{
+      if(a.category==='cash') return s + evKRW(a);
+      const qty = a.quantity || 1;
+      const isNew = isNewAsset(a, existIdsPnl);
+      const bp = isNew ? (a.avgPrice||a.currentPrice) : (a.prevPrice||a.currentPrice);
+      return s + (a.currency==='USD' ? bp*FX.USD*qty
+               : a.currency==='JPY' ? bp*FX.JPY*qty : bp*qty);
+    }, 0);
+    todayPnl = ev - baseEv;
+    todayPct = baseEv > 0 ? (todayPnl / baseEv) * 100 : 0;
   }
 
   document.getElementById('summaryGrid').innerHTML=[
@@ -1942,15 +1953,13 @@ let selectedAssets = _chartSel.sel;
 let showSum        = _chartSel.sum;
 
 // selectedAssets 초기화:
-// 1. 삭제/매도된 종목 ID 제거 (assets에 없는 ID 정리)
+// 삭제/매도된 종목 ID 제거 (assets에 없는 ID 정리)
 [...selectedAssets].forEach(id=>{ if(!assets.find(a=>a.id===id)) selectedAssets.delete(id); });
-// 2. 선택 목록이 비어있으면 전체 선택
+// 저장된 선택 없으면 전체 선택
 if(selectedAssets.size===0){
   assets.forEach(a=>selectedAssets.add(a.id));
-} else {
-  // 새로 추가된 종목은 자동 선택
-  assets.forEach(a=>{ if(!selectedAssets.has(a.id)) selectedAssets.add(a.id); });
 }
+// ※ 새로 추가된 종목 자동 선택 제거 → 리프레시 시 선택 유지
 
 function getPeriodStart(period){
   const now = new Date();
@@ -2614,11 +2623,12 @@ function renderStatBar(){
 }
 
 function renderToggles(){
-  const allSelected=assets.every(a=>selectedAssets.has(a.id))&&showSum;
+  const allSelected = assets.every(a=>selectedAssets.has(a.id));
+  const noneSelected = assets.every(a=>!selectedAssets.has(a.id));
   document.getElementById('assetToggles').innerHTML=
-    `<button class="toggle-ctrl" onclick="toggleAll()" style="background:${allSelected?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected?'#fff':'var(--color-text)'}">
-      ${allSelected?'전체 해제':'전체 선택'}</button>
-    <button class="toggle-ctrl" onclick="toggleSum()" style="background:${showSum?'var(--color-accent)':'var(--color-section-bg)'};color:${showSum?'#fff':'var(--color-text)'}">합계</button>`
+    `<button class="toggle-ctrl" onclick="selectAll()" style="background:${allSelected&&showSum?'#1c1c1e':'var(--color-section-bg)'};color:${allSelected&&showSum?'#fff':'var(--color-text)'}">전체 선택</button>`+
+    `<button class="toggle-ctrl" onclick="deselectAll()" style="background:${noneSelected&&!showSum?'#ff3b30':'var(--color-section-bg)'};color:${noneSelected&&!showSum?'#fff':'var(--color-text)'}">전체 해제</button>`+
+    `<button class="toggle-ctrl" onclick="toggleSum()" style="background:${showSum?'var(--color-accent)':'var(--color-section-bg)'};color:${showSum?'#fff':'var(--color-text)'}">합계</button>`
     +assets.map((a,i)=>{
       const col=a.category==='cash'?'#82E0AA':LINE_COLS[i%LINE_COLS.length];
       return`<button class="toggle-pill ${selectedAssets.has(a.id)?'on':''}"
@@ -2637,14 +2647,22 @@ function toggleSum(){
   saveChartSel();
   renderToggles();drawLineChart();renderStatBar();
 }
+function selectAll(){
+  assets.forEach(a=>selectedAssets.add(a.id));
+  showSum=true;
+  saveChartSel(); renderToggles(); drawLineChart(); renderStatBar();
+}
+function deselectAll(){
+  selectedAssets.clear();
+  showSum=false;
+  saveChartSel(); renderToggles(); drawLineChart(); renderStatBar();
+}
 function toggleAll(){
   const allSelected = assets.every(a=>selectedAssets.has(a.id)) && showSum;
   if(allSelected){
-    // 전체 해제: 종목 + 합계 모두 끄기
     selectedAssets.clear();
     showSum=false;
   } else {
-    // 전체 선택: 종목 + 합계 모두 켜기
     assets.forEach(a=>selectedAssets.add(a.id));
     showSum=true;
   }
