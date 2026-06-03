@@ -1745,37 +1745,10 @@ function renderSummary(){
   const pnl  = ev - cost;
   const rtn  = cost > 0 ? (pnl/cost)*100 : 0;
 
-  // 오늘 손익 = 1D 시작점(서머타임:22:30 / 비서머타임:23:30) 스냅샷 기준
-  // → 어제 미국장 + 오늘 한국장 변동 모두 반영
-  const oneDStart = getPeriodStart('1D').getTime();
-  const allSnaps  = loadSnaps().sort((a,b) => a.timestamp - b.timestamp);
-
-  // 22:30 직전 스냅샷 or 22:30 이후 첫 스냅샷
-  const baseSnap =
-    allSnaps.filter(s => s.timestamp <= oneDStart).slice(-1)[0] ||
-    allSnaps.filter(s => s.timestamp >  oneDStart)[0];
-
-  let todayPnl = 0, todayPct = 0;
-  if(baseSnap && baseSnap.totalValue > 0){
-    todayPnl = ev - baseSnap.totalValue;
-    todayPct = (todayPnl / baseSnap.totalValue) * 100;
-  } else {
-    // 스냅샷 없으면 그래프 합계와 동일한 baseTotalKRW 기준
-    const allSnapsForPnl = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
-    const startTs1Dp = getPeriodStart('1D').getTime();
-    const snapsBeforePnl = allSnapsForPnl.filter(s=>s.timestamp < startTs1Dp);
-    const existIdsPnl = new Set(snapsBeforePnl.flatMap(s=>Object.keys(s.byAsset||{})));
-    const baseEv = assets.reduce((s,a)=>{
-      if(a.category==='cash') return s + evKRW(a);
-      const qty = a.quantity || 1;
-      const isNew = isNewAsset(a, existIdsPnl);
-      const bp = isNew ? (a.avgPrice||a.currentPrice) : (a.prevPrice||a.currentPrice);
-      return s + (a.currency==='USD' ? bp*FX.USD*qty
-               : a.currency==='JPY' ? bp*FX.JPY*qty : bp*qty);
-    }, 0);
-    todayPnl = ev - baseEv;
-    todayPct = baseEv > 0 ? (todayPnl / baseEv) * 100 : 0;
-  }
+  // 오늘 손익 = 그래프 합계와 완전 동일 (getBaseEvKRW1D 합산)
+  const baseTotalForPnl = assets.reduce((s,a)=>s+getBaseEvKRW1D(a), 0) || ev || 1;
+  const todayPnl = ev - baseTotalForPnl;
+  const todayPct = (todayPnl / baseTotalForPnl) * 100;
 
   document.getElementById('summaryGrid').innerHTML=[
     {lbl:'총 평가금액',  val:fmt(ev),                                    sub:'',             cls:''},
@@ -1946,20 +1919,20 @@ function saveChartSel(){
     showSum, selected:[...selectedAssets]
   }));
 }
+// currentPeriod도 함께 저장 (setPeriod에서 이미 저장하지만 안전망)
 const _chartSel = loadChartSel();
 let currentPeriod = localStorage.getItem('currentPeriod') || '1D';
 let chartHistory  = [];
 let selectedAssets = _chartSel.sel;
 let showSum        = _chartSel.sum;
 
-// selectedAssets 초기화:
-// 삭제/매도된 종목 ID 제거 (assets에 없는 ID 정리)
+// selectedAssets 초기화: 삭제/매도된 종목 ID 제거
 [...selectedAssets].forEach(id=>{ if(!assets.find(a=>a.id===id)) selectedAssets.delete(id); });
-// 저장된 선택 없으면 전체 선택
-if(selectedAssets.size===0){
+// 완전히 아무것도 선택 안 된 경우(첫 실행)만 전체 선택
+if(selectedAssets.size===0 && !showSum){
   assets.forEach(a=>selectedAssets.add(a.id));
+  showSum = true;
 }
-// ※ 새로 추가된 종목 자동 선택 제거 → 리프레시 시 선택 유지
 
 function getPeriodStart(period){
   const now = new Date();
@@ -2003,36 +1976,43 @@ function getPeriodStart(period){
 // 미국(USD): prevPrice 기준 (어제 22:30 종가)
 // 한국/일본(KRW/JPY): prevPrice 기준 (오늘 09:00 종가)
 // 신규 종목(스냅샷에 없던 종목): null → 첫 스냅샷이 기준
-// 신규 종목 판별:
-// 1순위: 스냅샷 이력에 있으면 기존 종목
-// 2순위: 스냅샷 이력이 비어있을 때(초기화 후) → prevPrice < currentPrice * 0.99 이면 기존 종목
-//        (즉, 오늘 매수해서 prevPrice ≈ avgPrice ≈ currentPrice인 경우만 신규)
-function isNewAsset(a, existingIds){
-  // 1순위: 스냅샷 이력 기반 (가장 정확)
-  if(existingIds.size > 0) return !existingIds.has(a.id);
-  // 2순위: 스냅샷 없을 때 → avgPrice vs prevPrice 차이로 판별
-  // 신규 종목: avgPrice ≈ prevPrice (7% 이내) → 오늘 매수
-  // 기존 종목: avgPrice vs prevPrice 차이가 큼 (7% 이상)
-  if(!a.prevPrice || !a.avgPrice) return true;
-  const diff = Math.abs(a.prevPrice - a.avgPrice) / a.avgPrice;
-  return diff < 0.07; // 7% 이내면 오늘 매수 신규 종목
+// ── 1D 기준가 계산 (단순, 오류 없음) ──
+// 기존 종목: 가장 오래된 스냅샷에 있으면 → prevPrice
+// 신규 종목: 스냅샷에 없으면 → avgPrice (오늘 매수)
+// 스냅샷이 아예 없으면: prevPrice (기존) or avgPrice (신규, prevPrice=currentPrice)
+// 판별 우선순위:
+//   1. 스냅샷에 있는 종목 → prevPrice
+//   2. 스냅샷에 없는 종목 → avgPrice
+//   3. 스냅샷 자체가 없으면 → prevPrice≠currentPrice면 prevPrice, 아니면 avgPrice
+let _baseCache = null;
+function _getExistingIds(){
+  if(_baseCache) return _baseCache;
+  const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+  // 가장 오래된 스냅샷의 종목들이 기존 종목
+  const oldest = snaps[0];
+  _baseCache = oldest ? new Set(Object.keys(oldest.byAsset||{})) : null;
+  return _baseCache;
 }
-
-// 22:30 기준점용: USD 기존 종목만
-function getBaseEvKRW(a, existingIds){
-  if(a.category === 'cash') return evKRW(a);
-  if(a.currency !== 'USD') return null;
-  if(isNewAsset(a, existingIds)) return null;
-  return (a.prevPrice || a.currentPrice) * FX.USD * (a.quantity||1);
+function getBasePrice(a){
+  if(a.category === 'cash') return a.currentPrice;
+  const existIds = _getExistingIds();
+  if(existIds){
+    // 스냅샷 있음: 포함 여부로 판별
+    return existIds.has(a.id) ? (a.prevPrice||a.currentPrice) : (a.avgPrice||a.currentPrice);
+  }
+  // 스냅샷 없음: prevPrice로 판별
+  if(a.prevPrice && a.prevPrice !== a.currentPrice) return a.prevPrice;
+  return a.avgPrice || a.currentPrice;
 }
-
-// 09:00 기준점용: KRW/JPY 기존 종목만
-function getBaseEvKRWkr(a, existingIds){
-  if(a.currency === 'USD' || a.category === 'cash') return null;
-  if(isNewAsset(a, existingIds)) return null;
-  const p = a.prevPrice || a.currentPrice;
-  return a.currency === 'JPY' ? p*FX.JPY*(a.quantity||1) : p*(a.quantity||1);
+function getBaseEvKRW1D(a){
+  const qty = a.quantity || 1;
+  const bp  = getBasePrice(a);
+  if(a.currency === 'USD') return bp * FX.USD * qty;
+  if(a.currency === 'JPY') return bp * FX.JPY * qty;
+  return bp * qty;
 }
+// buildChartHistory 호출 시마다 캐시 초기화
+function clearBaseCache(){ _baseCache = null; }
 
 function buildSnapshotHistory(period){
   const startTs = getPeriodStart(period).getTime();
@@ -2056,46 +2036,36 @@ function buildSnapshotHistory(period){
     return {byAsset, byQty};
   }
 
-  // 1D 전용: 기준점 집합 계산
-  const snapsBeforeUs = allSnaps.filter(s=>s.timestamp < startTs);
-  const existingBeforeUs = new Set(snapsBeforeUs.flatMap(s=>Object.keys(s.byAsset||{})));
-
-  const krOpenTs = (() => { const t=new Date(); t.setHours(9,0,0,0); return t.getTime(); })();
-  const snapsBeforeKr = allSnaps.filter(s=>s.timestamp < krOpenTs);
-  const existingBeforeKr = new Set(snapsBeforeKr.flatMap(s=>Object.keys(s.byAsset||{})));
-
   const history = [];
 
   if(period === '1D'){
-    // ── 기준점 1: 22:30 (미국 종목 + 현금) ──
-    // 미국 기존 종목: prevPrice 기준값
-    // 신규 미국 종목 (prevPrice==currentPrice): 제외 → 첫 스냅샷부터 시작
-    const usBase = {}, usQty = {};
-    let usTotal = 0;
-    assets.forEach(a=>{
-      const qty = a.quantity || 1;
-      const ev  = getBaseEvKRW(a, existingBeforeUs); // USD + 현금만, 스냅샷 기반 신규 판별
-      if(ev == null) return;
-      usBase[a.id] = Math.round(ev);
-      usQty[a.id]  = qty;
-      usTotal += Math.round(ev);
-    });
-    history.push({ts: startTs, byAsset: usBase, byQty: usQty, total: usTotal});
+    // ── 1D 기준점 설계 ──
+    // 22:30: USD 종목 + 현금 (prevPrice or avgPrice 기준)
+    // 09:00: KRW/JPY 종목 추가 (prevPrice or avgPrice 기준)
+    // 신규 종목(prevPrice==currentPrice): 해당 기준점에 포함되지만 avgPrice로 0% 시작
+    // → 스냅샷 조회 불필요, 임계값 불필요
 
-    // ── 기준점 2: 오늘 09:00 (한국/일본 종목 추가) ──
-    // 스냅샷 이력 기반으로 신규 종목 판별
+    // 기준점 1: 22:30 (USD + 현금)
+    const base22 = {}, qty22 = {};
+    assets.forEach(a=>{
+      if(a.currency !== 'USD' && a.category !== 'cash') return;
+      base22[a.id] = Math.round(getBaseEvKRW1D(a));
+      qty22[a.id]  = a.quantity || 1;
+    });
+    history.push({ts: startTs, byAsset: base22, byQty: qty22,
+                  total: Object.values(base22).reduce((s,v)=>s+v,0)});
+
+    // 기준점 2: 09:00 (KRW/JPY 추가)
+    const krOpenTs = (() => { const t=new Date(); t.setHours(9,0,0,0); return t.getTime(); })();
     if(krOpenTs > startTs && krOpenTs < Date.now()){
-      const krBase = {...usBase}, krQtyMap = {...usQty};
-      let krTotal = usTotal;
+      const base09 = {...base22}, qty09 = {...qty22};
       assets.forEach(a=>{
-        const qty = a.quantity || 1;
-        const ev  = getBaseEvKRWkr(a, existingBeforeKr); // KRW/JPY만, 스냅샷 기반 신규 판별
-        if(ev == null) return;
-        krBase[a.id]   = Math.round(ev);
-        krQtyMap[a.id] = qty;
-        krTotal += Math.round(ev);
+        if(a.currency === 'USD' || a.category === 'cash') return;
+        base09[a.id] = Math.round(getBaseEvKRW1D(a));
+        qty09[a.id]  = a.quantity || 1;
       });
-      history.push({ts: krOpenTs, byAsset: krBase, byQty: krQtyMap, total: krTotal});
+      history.push({ts: krOpenTs, byAsset: base09, byQty: qty09,
+                    total: Object.values(base09).reduce((s,v)=>s+v,0)});
     }
 
     // 기간 내 스냅샷
@@ -2138,6 +2108,7 @@ function setPeriod(p){
 }
 
 async function buildChartHistory(){
+  clearBaseCache(); // 기준가 캐시 초기화
   chartHistory = buildSnapshotHistory(currentPeriod);
   drawLineChart();
   renderStatBar();
@@ -2188,35 +2159,16 @@ function drawLineChart(){
   const lines=[];
 
   if(showSum){
-    // 합계: 모든 종목이 포함된 시점부터 계산
-    // 각 히스토리 포인트의 총합 계산
-    const assetIds = assets.filter(a=>a.category!=='cash').map(a=>a.id);
-    const rawSum = chartHistory.map(h=>{
-      // 모든 비현금 종목이 포함된 포인트만 유효
-      const vals = Object.values(h.byAsset);
-      return vals.reduce((s,v)=>s+(v||0),0);
-    });
-
-    // baseTotalKRW: 각 종목의 기준가 합산
-    // - 기존 종목: prevPrice 기준
-    // - 신규 종목(isNewAsset): avgPrice 기준
-    const allSnapsForSum = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
-    const startTs1D = getPeriodStart('1D').getTime();
-    const snapsBefore = allSnapsForSum.filter(s=>s.timestamp < startTs1D);
-    const existIds = new Set(snapsBefore.flatMap(s=>Object.keys(s.byAsset||{})));
-
-    const baseTotalKRW = assets.reduce((s,a)=>{
-      if(a.category==='cash') return s + evKRW(a);
-      const qty = a.quantity || 1;
-      // 신규/기존 판별
-      const isNew = isNewAsset(a, existIds);
-      const bp = isNew ? (a.avgPrice||a.currentPrice) : (a.prevPrice||a.currentPrice);
-      return s + (a.currency==='USD' ? bp*FX.USD*qty
-               : a.currency==='JPY' ? bp*FX.JPY*qty : bp*qty);
-    }, 0) || 1;
-
-    // 합계 라인: baseTotalKRW 기준으로 % 계산
-    const sumVals = rawSum.map(v=> v!=null&&v>0 ? ((v-baseTotalKRW)/baseTotalKRW)*100 : null);
+    const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
+    let fvSum;
+    if(currentPeriod==='1D'){
+      // 1D: getBaseEvKRW1D 합산 (prevPrice or avgPrice, 단순)
+      fvSum = assets.reduce((s,a)=>s+getBaseEvKRW1D(a), 0) || 1;
+    } else {
+      // 1D 외: 첫 스냅샷값 기준
+      fvSum = rawSum.find(v=>v>0) || 1;
+    }
+    const sumVals = rawSum.map(v=> v!=null&&v>0 ? ((v-fvSum)/fvSum)*100 : null);
     lines.push({label:'합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
@@ -2560,11 +2512,10 @@ function renderStatBar(){
     if(!a){
       // 합계: drawLineChart와 동일한 fvSum 기준
       const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-      const fvSum2 = assets.reduce((s,a)=>{
-        if(a.category==='cash') return s + evKRW(a);
-        const qty = a.quantity||1, bp = a.prevPrice||a.currentPrice;
-        return s + (a.currency==='USD'?bp*FX.USD*qty:a.currency==='JPY'?bp*FX.JPY*qty:bp*qty);
-      }, 0) || rawSum.find(v=>v>0) || 1;
+      // drawLineChart와 완전 동일
+      const fvSum2 = currentPeriod==='1D'
+        ? assets.reduce((s,a)=>s+getBaseEvKRW1D(a),0)||1
+        : rawSum.find(v=>v>0)||1;
       const last = rawSum[rawSum.length-1] || fvSum2;
       const validRaw = rawSum.filter(v=>v>0);
       const hi = Math.max(...validRaw), lo = Math.min(...validRaw);
