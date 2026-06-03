@@ -2834,6 +2834,12 @@ window.addEventListener('resize',()=>drawLineChart());
 
 (async function init(){
   renderAll();renderSnaps();renderIndices();
+
+  // ★ 저장된 기간 탭 활성화 (리프레시 시 유지)
+  document.querySelectorAll('#periodTabs button').forEach(b=>{
+    b.classList.toggle('active', b.textContent===currentPeriod);
+  });
+
   fetchIndices();
   // ★ 누락 스냅샷 보완 (페이지 닫혀있던 동안 못 찍은 스냅샷)
   setTimeout(catchUpSnaps, 3000);
