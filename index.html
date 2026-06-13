@@ -430,13 +430,13 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   <div class="tbl-wrap">
     <table>
       <thead><tr>
-        <th style="text-align:left">사유</th>
-        <th>실현손익</th>
         <th style="text-align:left">날짜</th>
         <th style="text-align:left">종목</th>
         <th>구분</th>
         <th>체결단가 × 수량</th>
         <th>총금액</th>
+        <th style="text-align:left">사유</th>
+        <th>실현손익</th>
         <th>삭제</th>
       </tr></thead>
       <tbody id="soldTbody"></tbody>
@@ -1084,13 +1084,13 @@ function renderSoldHistory(){
     }
     const reasonStr = r.reason ? r.reason : '';
     return `<tr>
-      <td style="font-size:12px;line-height:1.4;text-align:left;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reasonStr.replace(/"/g,'&quot;')}">${reasonStr||'—'}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:right;">${pnlCell}</td>
       <td style="font-size:12px;line-height:1.4;text-align:left;color:var(--color-tertiary);">${dtStr}</td>
       <td style="font-size:12px;line-height:1.4;text-align:left;font-weight:600;">${r.name}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${typeBadge}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${fmt(r.totalKRW||0)}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:left;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reasonStr.replace(/"/g,'&quot;')}">${reasonStr||'—'}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:right;">${pnlCell}</td>
       <td style="line-height:1.4;text-align:right;"><button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button></td>
     </tr>`;
   }).join('');
