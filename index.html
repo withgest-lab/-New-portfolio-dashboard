@@ -2473,52 +2473,66 @@ function buildSnapshotHistory(period){
   const startTs = getPeriodStart(period).getTime();
   const allSnaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
   let   periodSnaps = allSnaps.filter(s=>s.timestamp>=startTs && s.totalValue>0);
-  const nowByAsset  = Object.fromEntries(assets.map(a=>[a.id, Math.round(evKRW(a))]));
-  const nowByQty    = Object.fromEntries(assets.map(a=>[a.id, a.quantity||1]));
-  const nowTotal    = totalEv();
+  
+  // 현재 보유 자산 (현금 제외)
+  const currentAssets = assets.filter(a => a.category !== 'cash');
+  const nowByAsset  = Object.fromEntries(currentAssets.map(a=>[a.id, Math.round(evKRW(a))]));
+  const nowByQty    = Object.fromEntries(currentAssets.map(a=>[a.id, a.quantity||1]));
+  const nowTotal    = currentAssets.reduce((s,a)=>s+evKRW(a), 0) || 1;
 
-  // 스냅샷 → byAsset, byQty 반환
+  // 스냅샷 → byAsset, byQty 반환 (현금 제외)
   function snapToPoint(s){
     const byAsset = s.byAsset && Object.keys(s.byAsset).length
-      ? {...s.byAsset}
+      ? (() => {
+          const r = {};
+          currentAssets.forEach(a => {
+            if(s.byAsset[a.id]) r[a.id] = s.byAsset[a.id];
+          });
+          return r;
+        })()
       : (() => {
           const sc = nowTotal>0 ? s.totalValue/nowTotal : 1;
           const r  = {};
-          assets.forEach(a=>{ r[a.id] = Math.round(evKRW(a)*sc); });
+          currentAssets.forEach(a=>{ r[a.id] = Math.round(evKRW(a)*sc); });
           return r;
         })();
-    const byQty = s.byQty ? {...s.byQty} : {...nowByQty};
+    const byQty = s.byQty ? (() => {
+      const r = {};
+      currentAssets.forEach(a => {
+        if(s.byQty[a.id]) r[a.id] = s.byQty[a.id];
+      });
+      return r;
+    })() : {...nowByQty};
     return {byAsset, byQty};
   }
 
   const history = [];
 
   if(period === '1D'){
-    // ── 1D: prevPrice 기반 가상 기준점 항상 삽입 ──
-    // 스냅샷 타이밍과 무관하게 항상 22:30(서머타임)/23:30 기준
-    // → 자산목록 전일비와 항상 동일, V자 없음
-    // 1D 가상 기준점: 기존 종목만 포함
-    // 신규 종목(_getExistingIds에 없는 종목)은 제외
-    // → 매수 시점(첫 스냅샷)부터 선이 시작됨
+    // ── 1D: 현재 보유 자산(현금 제외)만 기준 ──
     const _existIds1D = _getExistingIds();
+    
     const base1D = {}, qty1D = {};
-    assets.forEach(a=>{
+    currentAssets.forEach(a=>{
       // 신규 종목이면 가상 기준점에서 제외
-      if(_existIds1D && !_existIds1D.has(a.id) && a.category !== 'cash') return;
+      if(_existIds1D && !_existIds1D.has(a.id)) return;
       base1D[a.id] = Math.round(getBaseEvKRW1D(a));
       qty1D[a.id]  = a.quantity || 1;
     });
+    
     history.push({ts: startTs, byAsset: base1D, byQty: qty1D,
                   total: Object.values(base1D).reduce((s,v)=>s+v,0)});
 
-    // 기간 내 스냅샷 추가
+    // 기간 내 스냅샷 추가 - 현금 제외 합계로 재계산
     periodSnaps.forEach(s=>{
       const p = snapToPoint(s);
-      history.push({ts: s.timestamp, byAsset: p.byAsset, byQty: p.byQty, total: s.totalValue});
+      // 현재 보유 자산만 기준으로 total 재계산
+      const snapshotTotal = Object.values(p.byAsset).reduce((s,v)=>s+v, 0) || 1;
+      history.push({ts: s.timestamp, byAsset: p.byAsset, byQty: p.byQty, total: snapshotTotal});
     });
 
   } else {
-    // ── 1D 외 기간: 스냅샷 기반 ──
+    // ── 1D 외 기간: 스냅샷 기반 (현금 제외) ──
     const beforeStart = allSnaps.filter(s=>s.timestamp<startTs)
                                 .sort((a,b)=>b.timestamp-a.timestamp)[0];
     if(!periodSnaps.length && !beforeStart){
@@ -2527,18 +2541,22 @@ function buildSnapshotHistory(period){
     }
     if(beforeStart){
       const p = snapToPoint(beforeStart);
-      history.push({ts:startTs, byAsset:p.byAsset, byQty:p.byQty, total:beforeStart.totalValue});
+      const beforeTotal = Object.values(p.byAsset).reduce((s,v)=>s+v, 0) || 1;
+      history.push({ts:startTs, byAsset:p.byAsset, byQty:p.byQty, total:beforeTotal});
     } else if(periodSnaps.length){
       const p = snapToPoint(periodSnaps[0]);
-      history.push({ts:periodSnaps[0].timestamp, byAsset:p.byAsset, byQty:p.byQty, total:periodSnaps[0].totalValue});
+      const snapTotal = Object.values(p.byAsset).reduce((s,v)=>s+v, 0) || 1;
+      history.push({ts:periodSnaps[0].timestamp, byAsset:p.byAsset, byQty:p.byQty, total:snapTotal});
       periodSnaps = periodSnaps.slice(1);
     }
     periodSnaps.forEach(s=>{
       const p = snapToPoint(s);
-      history.push({ts:s.timestamp, byAsset:p.byAsset, byQty:p.byQty, total:s.totalValue});
+      const snapTotal = Object.values(p.byAsset).reduce((s,v)=>s+v, 0) || 1;
+      history.push({ts:s.timestamp, byAsset:p.byAsset, byQty:p.byQty, total:snapTotal});
     });
   }
 
+  // 현재 포인트: 현금 제외
   history.push({ts:Date.now(), byAsset:nowByAsset, byQty:nowByQty, total:nowTotal});
   return history;
 }
