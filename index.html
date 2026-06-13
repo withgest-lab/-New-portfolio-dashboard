@@ -80,9 +80,12 @@ canvas#lineChart{width:100%!important;display:block;}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;}
 th{font-size:10px;font-weight:600;color:var(--color-tertiary);text-transform:uppercase;
   letter-spacing:.05em;text-align:right;padding:7px 4px;border-bottom:1px solid var(--color-border);white-space:nowrap;}
-th:first-child{text-align:left;position:sticky;left:0;background:#fff;z-index:3;min-width:110px;}
+th:first-child{text-align:left;position:sticky;left:0;background:#fff;z-index:3;min-width:70px;}
 td{padding:8px 4px;border-bottom:1px solid #f2f2f7;text-align:right;white-space:nowrap;vertical-align:middle;background:#fff;}
-td:first-child{position:sticky;left:0;background:#fff;z-index:2;text-align:left;min-width:110px;}
+td:first-child{position:sticky;left:0;background:#fff;z-index:2;text-align:left;min-width:70px;}
+table.table-auto{width:auto;min-width:0;}
+table.table-auto th,table.table-auto td{padding-left:10px;padding-right:10px;}
+table.table-auto th:first-child,table.table-auto td:first-child{min-width:0;padding-left:4px;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#f7f7f9!important;}
 tr:hover td:first-child{background:#f7f7f9!important;}
@@ -281,6 +284,9 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
         <option value="USD">USD $</option>
         <option value="JPY">JPY ¥</option>
       </select></label>
+      <label style="flex:1;min-width:140px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
+        <input id="af_reason" placeholder="매수 사유" style="width:100%">
+      </label>
       <button class="btn btn-primary" onclick="addAsset()">+ 매수</button>
     </div>
 
@@ -293,6 +299,9 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
       <label>보유수량<input id="sf_held" style="width:80px;background:var(--color-section-bg);" readonly></label>
       <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
       <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
+      <label style="flex:1;min-width:140px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
+        <input id="sf_reason" placeholder="매도 사유" style="width:100%">
+      </label>
       <button class="btn btn-red" onclick="sellAsset()">− 매도</button>
     </div>
     <!-- 현금 폼 -->
@@ -391,7 +400,7 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     <button class="btn btn-ghost" onclick="clearSnaps()">이력 초기화</button>
   </div>
   <div class="tbl-wrap">
-    <table>
+    <table class="table-auto">
       <thead><tr>
         <th style="text-align:left">저장 시각</th>
         <th>총 평가금액</th>
@@ -428,7 +437,7 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   </div>
   <div id="tradeLogStatus" style="font-size:12px;color:var(--color-secondary);min-height:16px;padding:4px 0;"></div>
   <div class="tbl-wrap">
-    <table>
+    <table class="table-auto">
       <thead><tr>
         <th style="text-align:left">날짜</th>
         <th style="text-align:left">종목</th>
@@ -888,9 +897,24 @@ function addTradeLog(entry){
 }
 
 function deleteSoldHistory(id){
-  const arr = loadTradeLog().filter(r=>r.id!==id);
-  saveTradeLog(arr);
-  renderSoldHistory();
+  const arr = loadTradeLog();
+  const r = arr.find(x=>x.id===id);
+  if(!r) return;
+  pendingTrade = {mode:'tradelog_delete', tradeLogId:id};
+  const titleEl    = document.getElementById('tc_title');
+  const detailEl   = document.getElementById('tc_detail');
+  const confirmBtn = document.getElementById('tc_confirm');
+  const sym = CUR_SYM[r.currency]||'₩';
+  const dt = new Date(r.at);
+  const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  titleEl.innerHTML = `<span style="color:var(--color-up)">🗑 매매 이력 삭제</span>`;
+  detailEl.innerHTML = `${dtStr} · <b>${r.name}</b> (${r.type==='buy'?'매수':'매도'})<br>
+    ${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}<br>
+    <span style="color:var(--color-tertiary);font-size:11px;">이 매매 이력을 삭제할까요?</span>`;
+  document.getElementById('tc_reason_wrap').style.display='none';
+  confirmBtn.style.background = 'var(--color-up)';
+  confirmBtn.textContent = '삭제 확인';
+  document.getElementById('tradeConfirmModal').classList.add('open');
 }
 function clearTradeLog(){
   if(!confirm('매매 이력을 전체 삭제할까요?')) return;
@@ -1486,6 +1510,15 @@ function executeTrade(){
     return;
   }
 
+  // 매매 이력 개별 삭제
+  if(mode==='tradelog_delete'){
+    const {tradeLogId} = trade;
+    const arr = loadTradeLog().filter(r=>r.id!==tradeLogId);
+    saveTradeLog(arr);
+    renderSoldHistory();
+    return;
+  }
+
   // 스냅샷 전체 초기화
   if(mode==='snap_clear'){
     saveSnaps([]);
@@ -1806,13 +1839,13 @@ document.addEventListener('click',e=>{
 });
 
 function resetBuyForm(){
-  ['af_name','af_ticker','af_qty','af_price'].forEach(id=>document.getElementById(id).value='');
+  ['af_name','af_ticker','af_qty','af_price','af_reason'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('af_cat').value='';
   document.getElementById('af_cur').value='KRW';
   document.getElementById('af_suggestions').style.display='none';
 }
 function resetSellForm(){
-  ['sf_name','sf_held','sf_qty','sf_price'].forEach(id=>{
+  ['sf_name','sf_held','sf_qty','sf_price','sf_reason'].forEach(id=>{
     const el=document.getElementById(id);
     if(el){el.value='';if(el.dataset)delete el.dataset.assetId;}
   });
@@ -1853,7 +1886,7 @@ function addAsset(){
   confirmBtn.style.background = '#007aff';
   confirmBtn.textContent = '매수 확인';
   document.getElementById('tc_reason_wrap').style.display='block';
-  document.getElementById('tc_reason').value='';
+  document.getElementById('tc_reason').value=document.getElementById('af_reason').value.trim();
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1886,7 +1919,7 @@ function sellAsset(){
   confirmBtn.style.background = 'var(--color-up)';
   confirmBtn.textContent = '매도 확인';
   document.getElementById('tc_reason_wrap').style.display='block';
-  document.getElementById('tc_reason').value='';
+  document.getElementById('tc_reason').value=document.getElementById('sf_reason').value.trim();
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
