@@ -403,21 +403,40 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   </div>
 </div>
 
-<!-- 7. 실현손익 이력 -->
+<!-- 7. 매매 이력 -->
 <div class="card">
   <div class="snap-header">
-    <div class="section-label" style="margin:0">실현손익 이력</div>
-    <button class="btn btn-ghost" onclick="clearSoldHistory()">이력 초기화</button>
+    <div class="section-label" style="margin:0">매매 이력</div>
+    <button class="btn btn-ghost" onclick="clearTradeLog()">이력 초기화</button>
   </div>
   <div id="soldTotal" style="display:none;padding:8px 0 4px;font-size:13px;color:var(--color-secondary);"></div>
+  <div class="add-form" style="padding-top:14px;">
+    <label>종목명
+      <input id="tl_name" placeholder="" style="width:130px" autocomplete="off">
+    </label>
+    <label>날짜<input id="tl_date" type="date" style="width:130px"></label>
+    <label>구분<select id="tl_type">
+      <option value="buy">매수</option>
+      <option value="sell">매도</option>
+    </select></label>
+    <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:100px"></label>
+    <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:80px"></label>
+    <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
+      <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
+    </label>
+    <button class="btn btn-primary" onclick="addTradeLog_manual()">기록 추가</button>
+  </div>
+  <div id="tradeLogStatus" style="font-size:12px;color:var(--color-secondary);min-height:16px;padding:4px 0;"></div>
   <div class="tbl-wrap">
     <table>
       <thead><tr>
-        <th style="text-align:left">종목</th>
-        <th style="text-align:left">매도일시</th>
-        <th>매도가 × 수량</th>
+        <th style="text-align:left">사유</th>
         <th>실현손익</th>
-        <th>수익률</th>
+        <th style="text-align:left">날짜</th>
+        <th style="text-align:left">종목</th>
+        <th>구분</th>
+        <th>체결단가 × 수량</th>
+        <th>총금액</th>
         <th>삭제</th>
       </tr></thead>
       <tbody id="soldTbody"></tbody>
@@ -434,7 +453,13 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
 <div class="modal-bg" id="tradeConfirmModal">
   <div class="modal-box" style="max-width:320px;position:relative;text-align:center;">
     <div id="tc_title" style="font-size:17px;font-weight:700;margin-bottom:8px;"></div>
-    <div id="tc_detail" style="font-size:13px;color:var(--color-secondary);margin-bottom:20px;line-height:1.6;"></div>
+    <div id="tc_detail" style="font-size:13px;color:var(--color-secondary);margin-bottom:12px;line-height:1.6;"></div>
+    <div id="tc_reason_wrap" style="display:none;margin-bottom:16px;text-align:left;">
+      <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+        사유 <span style="font-size:9px;">(선택)</span>
+        <input id="tc_reason" placeholder="매수·매도 사유" style="border:1px solid var(--color-border);border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit;width:100%;">
+      </label>
+    </div>
     <div style="display:flex;gap:10px;">
       <button id="tc_cancel" class="btn btn-ghost" style="flex:1;padding:10px;"
         onclick="closeTradeConfirm()">취소</button>
@@ -502,6 +527,7 @@ const CUR_SYM    = {KRW:'₩',USD:'$',JPY:'¥'};
 const SNAP_KEY    = 'pf_snaps_v5';
 const ASSETS_KEY  = 'pf_assets_v1';
 const SOLD_KEY    = 'pf_sold_v1';
+const TRADE_KEY   = 'pf_tradelog_v1';
 const FX_KEY      = 'pf_fx_v1';
 // Google Sheets 동기화 제거됨 - 드라이브 직접 백업으로 대체
 
@@ -812,27 +838,149 @@ function loadSnaps(){
 }
 function saveSnaps(arr){localStorage.setItem(SNAP_KEY,JSON.stringify(arr));}
 
-// ── 매도 이력 ──
-function loadSoldHistory(){ try{ return JSON.parse(localStorage.getItem(SOLD_KEY)||'[]'); }catch(e){return[];} }
-function saveSoldHistory(arr){ localStorage.setItem(SOLD_KEY, JSON.stringify(arr)); }
-function addSoldHistory(a, qty, soldPrice){
-  const arr = loadSoldHistory();
-  const pnl = (soldPrice - a.avgPrice) * qty * (a.currency==='USD'?FX.USD:a.currency==='JPY'?FX.JPY:1);
-  const pnlPct = ((soldPrice - a.avgPrice) / a.avgPrice) * 100;
-  arr.unshift({
-    id: uid(),
-    name: a.name,
-    ticker: a.ticker,
-    soldAt: Date.now(),
-    soldPrice,
-    avgPrice: a.avgPrice,
-    quantity: qty,
-    currency: a.currency,
-    pnl: Math.round(pnl),
-    pnlPct: Math.round(pnlPct*100)/100
-  });
-  saveSoldHistory(arr);
+// ── 매매 이력 ──
+function loadTradeLog(){ try{ return JSON.parse(localStorage.getItem(TRADE_KEY)||'[]'); }catch(e){return[];} }
+function saveTradeLog(arr){ localStorage.setItem(TRADE_KEY, JSON.stringify(arr)); }
+
+// 기존 실현손익 이력(pf_sold_v1)을 매매 이력으로 1회 마이그레이션
+function migrateSoldHistory(){
+  try{
+    const old = JSON.parse(localStorage.getItem(SOLD_KEY)||'[]');
+    if(!old.length) return;
+    const arr = loadTradeLog();
+    old.forEach(r=>{
+      arr.unshift({
+        id: r.id || uid(),
+        name: r.name,
+        ticker: r.ticker,
+        type: 'sell',
+        at: r.soldAt,
+        price: r.soldPrice,
+        quantity: r.quantity,
+        currency: r.currency,
+        totalKRW: Math.round((r.soldPrice||0) * (r.quantity||0) * (r.currency==='USD'?FX.USD:r.currency==='JPY'?FX.JPY:1)),
+        pnl: r.pnl,
+        pnlPct: r.pnlPct,
+        reason: r.reason || ''
+      });
+    });
+    saveTradeLog(arr);
+    localStorage.removeItem(SOLD_KEY);
+  }catch(e){}
+}
+
+// 통화에 맞는 현금 자산이 정확히 1개일 때 잔액 자동 조정 (매수: 차감, 매도: 가산)
+// 반환: 조정된 현금 자산 이름 또는 null
+function adjustCashBalance(currency, amountInCurrency, sign){
+  const cashAssets = assets.filter(a=>a.category==='cash' && a.currency===currency);
+  if(cashAssets.length!==1) return null;
+  const cash = cashAssets[0];
+  const newAmt = (cash.avgPrice||0) + sign*amountInCurrency;
+  cash.avgPrice = newAmt; cash.currentPrice = newAmt; cash.prevPrice = newAmt;
+  return cash.name;
+}
+
+function addTradeLog(entry){
+  const arr = loadTradeLog();
+  arr.unshift({ id: uid(), ...entry });
+  saveTradeLog(arr);
   renderSoldHistory();
+}
+
+function deleteSoldHistory(id){
+  const arr = loadTradeLog().filter(r=>r.id!==id);
+  saveTradeLog(arr);
+  renderSoldHistory();
+}
+function clearTradeLog(){
+  if(!confirm('매매 이력을 전체 삭제할까요?')) return;
+  saveTradeLog([]);
+  renderSoldHistory();
+}
+
+// 매도 시 매매 이력 자동 기록 (실현손익 계산 포함) + 현금 자동 가산
+function logSellTrade(a, qty, sellPrice, reason){
+  const fxRate = a.currency==='USD'?FX.USD:a.currency==='JPY'?FX.JPY:1;
+  const pnl = (sellPrice - a.avgPrice) * qty * fxRate;
+  const pnlPct = a.avgPrice>0 ? ((sellPrice - a.avgPrice) / a.avgPrice) * 100 : null;
+  const totalKRW = Math.round(sellPrice * qty * fxRate);
+  const cashName = a.category!=='cash' ? adjustCashBalance(a.currency, sellPrice*qty, +1) : null;
+  addTradeLog({
+    name: a.name, ticker: a.ticker, type: 'sell', at: Date.now(),
+    price: sellPrice, quantity: qty, currency: a.currency,
+    totalKRW, pnl: Math.round(pnl),
+    pnlPct: pnlPct===null?null:Math.round(pnlPct*100)/100,
+    reason: reason||'', cashAdjusted: cashName
+  });
+}
+
+// 매수 시 매매 이력 자동 기록 + 현금 자동 차감
+function logBuyTrade(a, qty, buyPrice, reason){
+  const fxRate = a.currency==='USD'?FX.USD:a.currency==='JPY'?FX.JPY:1;
+  const totalKRW = Math.round(buyPrice * qty * fxRate);
+  const cashName = a.category!=='cash' ? adjustCashBalance(a.currency, buyPrice*qty, -1) : null;
+  addTradeLog({
+    name: a.name, ticker: a.ticker||'—', type: 'buy', at: Date.now(),
+    price: buyPrice, quantity: qty, currency: a.currency,
+    totalKRW, pnl: null, pnlPct: null,
+    reason: reason||'', cashAdjusted: cashName
+  });
+}
+
+// 수동 매매 이력 추가 (입력 폼)
+function addTradeLog_manual(){
+  const name  = document.getElementById('tl_name').value.trim();
+  const dateV = document.getElementById('tl_date').value;
+  const type  = document.getElementById('tl_type').value;
+  const price = parseFloat(document.getElementById('tl_price').value);
+  const qty   = parseFloat(document.getElementById('tl_qty').value);
+  const reason = document.getElementById('tl_reason').value.trim();
+  const st = document.getElementById('tradeLogStatus');
+
+  if(!name){ st.textContent='❌ 종목명을 입력해 주세요.'; return; }
+  if(isNaN(price)||price<=0){ st.textContent='❌ 체결단가를 입력해 주세요.'; return; }
+  if(isNaN(qty)||qty<=0){ st.textContent='❌ 수량을 입력해 주세요.'; return; }
+
+  const at = dateV ? new Date(dateV+'T00:00:00').getTime() : Date.now();
+  const existing = assets.find(a=>a.name===name);
+
+  if(existing){
+    const fxRate = existing.currency==='USD'?FX.USD:existing.currency==='JPY'?FX.JPY:1;
+    const totalKRW = Math.round(price*qty*fxRate);
+    if(type==='buy'){
+      const totalQty = existing.quantity + qty;
+      existing.avgPrice = Math.round(((existing.avgPrice*existing.quantity)+(price*qty))/totalQty*100)/100;
+      existing.quantity = totalQty;
+      const cashName = existing.category!=='cash' ? adjustCashBalance(existing.currency, price*qty, -1) : null;
+      addTradeLog({name:existing.name, ticker:existing.ticker, type:'buy', at, price, quantity:qty, currency:existing.currency, totalKRW, pnl:null, pnlPct:null, reason, cashAdjusted:cashName});
+      st.textContent = `✅ ${existing.name} 매수 기록 추가${cashName?` · ${cashName} 잔액 차감`:''}`;
+    } else {
+      if(qty>existing.quantity){ st.textContent=`❌ 보유 수량(${existing.quantity.toLocaleString()}) 초과`; return; }
+      const pnl = (price-existing.avgPrice)*qty*fxRate;
+      const pnlPct = existing.avgPrice>0?((price-existing.avgPrice)/existing.avgPrice)*100:null;
+      const cashName = existing.category!=='cash' ? adjustCashBalance(existing.currency, price*qty, +1) : null;
+      if(qty===existing.quantity){
+        assets = assets.filter(x=>x.id!==existing.id);
+        selectedAssets.delete(existing.id); saveChartSel();
+      } else {
+        existing.quantity -= qty;
+      }
+      addTradeLog({name:existing.name, ticker:existing.ticker, type:'sell', at, price, quantity:qty, currency:existing.currency, totalKRW, pnl:Math.round(pnl), pnlPct:pnlPct===null?null:Math.round(pnlPct*100)/100, reason, cashAdjusted:cashName});
+      st.textContent = `✅ ${existing.name} 매도 기록 추가${cashName?` · ${cashName} 잔액 가산`:''}`;
+    }
+    saveAssets(); renderAll();
+  } else {
+    // 자산목록에 없는 종목 → 이력만 기록 (KRW 가정, 손익/현금 처리 없음)
+    const totalKRW = Math.round(price*qty);
+    addTradeLog({name, ticker:'—', type, at, price, quantity:qty, currency:'KRW', totalKRW, pnl:null, pnlPct:null, reason, cashAdjusted:null});
+    st.textContent = `✅ ${name} 매매 이력 추가 (자산목록 미등록 · 보유수량/현금 미반영)`;
+  }
+  document.getElementById('tl_name').value='';
+  document.getElementById('tl_date').value='';
+  document.getElementById('tl_price').value='';
+  document.getElementById('tl_qty').value='';
+  document.getElementById('tl_reason').value='';
+  setTimeout(()=>{st.textContent='';},3500);
 }
 
 function compressSnaps(snaps) {
@@ -901,47 +1049,51 @@ function saveSnap(isManual=false){
   saveSnaps(snaps);
   renderSnaps();
 }
-// ── 실현손익 이력 렌더링 ──
+// ── 매매 이력 렌더링 ──
 function renderSoldHistory(){
   const el = document.getElementById('soldTbody');
   if(!el) return;
-  const arr = loadSoldHistory();
+  const arr = loadTradeLog();
   if(!arr.length){
-    el.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--color-tertiary);">매도 이력 없음</td></tr>`;
-    // 총 실현손익 숨김
+    el.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--color-tertiary);">매매 이력 없음</td></tr>`;
     const total = document.getElementById('soldTotal');
     if(total) total.style.display='none';
     return;
   }
-  const totalPnl = arr.reduce((s,r)=>s+r.pnl, 0);
+  const sells = arr.filter(r=>r.type==='sell' && r.pnl!==null && r.pnl!==undefined);
   const totalEl = document.getElementById('soldTotal');
-  if(totalEl){
+  if(sells.length && totalEl){
+    const totalPnl = sells.reduce((s,r)=>s+r.pnl, 0);
     totalEl.style.display='block';
     totalEl.innerHTML = `총 실현손익: <span class="${totalPnl>=0?'color-up':'color-dn'}" style="font-weight:700;">${totalPnl>=0?'+':''}${fmt(totalPnl)}</span>`;
+  } else if(totalEl){
+    totalEl.style.display='none';
   }
-  el.innerHTML = arr.map((r,i)=>{
-    const dt = new Date(r.soldAt);
+  el.innerHTML = arr.map(r=>{
+    const dt = new Date(r.at);
     const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
     const sym = r.currency==='USD'?'$':r.currency==='JPY'?'¥':'₩';
+    const isBuy = r.type==='buy';
+    const typeBadge = isBuy
+      ? `<span style="color:#007aff;font-weight:700;">매수</span>`
+      : `<span style="color:var(--color-up);font-weight:700;">매도</span>`;
+    let pnlCell = '—';
+    if(!isBuy && r.pnl!==null && r.pnl!==undefined){
+      const pctStr = (r.pnlPct===null||r.pnlPct===undefined) ? '' : ` (${r.pnlPct>=0?'+':''}${r.pnlPct.toFixed(2)}%)`;
+      pnlCell = `<span class="${r.pnl>=0?'color-up':'color-dn'}" style="font-weight:600;">${r.pnl>=0?'+':''}${fmt(r.pnl)}${pctStr}</span>`;
+    }
+    const reasonStr = r.reason ? r.reason : '';
     return `<tr>
+      <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reasonStr.replace(/"/g,'&quot;')}">${reasonStr}</td>
+      <td style="font-size:11px;">${pnlCell}</td>
+      <td style="font-size:11px;color:var(--color-tertiary);">${dtStr}</td>
       <td style="font-size:12px;font-weight:600;">${r.name}</td>
-      <td style="font-size:11px;color:var(--color-tertiary)">${dtStr}</td>
-      <td style="font-size:11px;">${sym}${r.soldPrice.toLocaleString()} × ${r.quantity.toLocaleString()}</td>
-      <td class="${r.pnl>=0?'color-up':'color-dn'}" style="font-weight:600;">${r.pnl>=0?'+':''}${fmt(r.pnl)}</td>
-      <td class="${r.pnlPct>=0?'color-up':'color-dn'}">${r.pnlPct>=0?'+':''}${r.pnlPct.toFixed(2)}%</td>
+      <td>${typeBadge}</td>
+      <td style="font-size:11px;">${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}</td>
+      <td style="font-size:11px;">${fmt(r.totalKRW||0)}</td>
       <td><button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button></td>
     </tr>`;
   }).join('');
-}
-function deleteSoldHistory(id){
-  const arr = loadSoldHistory().filter(r=>r.id!==id);
-  saveSoldHistory(arr);
-  renderSoldHistory();
-}
-function clearSoldHistory(){
-  if(!confirm('실현손익 이력을 전체 삭제할까요?')) return;
-  saveSoldHistory([]);
-  renderSoldHistory();
 }
 
 function deleteSnap(snapKey){
@@ -957,6 +1109,7 @@ function deleteSnap(snapKey){
   detailEl.innerHTML = `${new Date(s.timestamp).toLocaleString('ko-KR')}<br><b>${fmt(s.totalValue)}</b><br><span style="color:var(--color-tertiary);font-size:11px;">이 스냅샷을 삭제할까요?</span>`;
   confirmBtn.style.background = 'var(--color-up)';
   confirmBtn.textContent = '삭제 확인';
+  document.getElementById('tc_reason_wrap').style.display='none';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -969,6 +1122,7 @@ function clearSnaps(){
   detailEl.innerHTML = `스냅샷 이력 <b>전체</b>를 삭제할까요?<br><span style="color:var(--color-tertiary);font-size:11px;">삭제 후 복구가 불가능합니다.</span>`;
   confirmBtn.style.background = 'var(--color-up)';
   confirmBtn.textContent = '전체 삭제 확인';
+  document.getElementById('tc_reason_wrap').style.display='none';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1300,11 +1454,14 @@ function confirmTrade(id, mode){
     confirmBtn.style.background = 'var(--color-up)';
     confirmBtn.textContent = '매도 확인';
   }
+  document.getElementById('tc_reason_wrap').style.display='block';
+  document.getElementById('tc_reason').value='';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
 function closeTradeConfirm(){
   document.getElementById('tradeConfirmModal').classList.remove('open');
+  document.getElementById('tc_reason_wrap').style.display='none';
   pendingTrade = null;
 }
 
@@ -1313,6 +1470,8 @@ function executeTrade(){
   // ★ closeTradeConfirm이 pendingTrade를 null로 만들기 전에 먼저 저장
   const trade = pendingTrade;
   const {id, mode, qty, price} = trade;
+  const tcReasonEl = document.getElementById('tc_reason');
+  const tradeReason = tcReasonEl ? tcReasonEl.value.trim() : '';
   closeTradeConfirm(); // 여기서 pendingTrade = null 됨
   const st = document.getElementById('formStatus');
 
@@ -1372,16 +1531,20 @@ function executeTrade(){
     const existing = tickerVal!=='—'
       ? assets.find(a=>a.ticker.toUpperCase()===tickerVal)
       : assets.find(a=>a.name===name && a.currency===cur && a.category===cat);
+    let cashName = null;
     if(existing){
       const prevQty  = existing.quantity;
       const totalQty = prevQty + fQty;
       existing.avgPrice = Math.round(((existing.avgPrice*prevQty)+(fPrice*fQty))/totalQty*100)/100;
       existing.quantity = totalQty;
-      if(st){ st.textContent=`✅ ${existing.name} ${fQty.toLocaleString()}주 매수 → 총 ${totalQty.toLocaleString()}주`; setTimeout(()=>{st.textContent='';},3000); }
+      cashName = existing.category!=='cash' ? adjustCashBalance(existing.currency, fPrice*fQty, -1) : null;
+      if(st){ st.textContent=`✅ ${existing.name} ${fQty.toLocaleString()}주 매수 → 총 ${totalQty.toLocaleString()}주${cashName?` · ${cashName} 잔액 차감`:''}`; setTimeout(()=>{st.textContent='';},3000); }
     } else {
       assets.push({id:uid(),ticker:tickerVal,name,category:cat,quantity:fQty,avgPrice:fPrice,currentPrice:fPrice,prevPrice:fPrice,currency:cur});
-      if(st){ st.textContent=`✅ ${name} 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.`; setTimeout(()=>{st.textContent='';},3000); }
+      cashName = cat!=='cash' ? adjustCashBalance(cur, fPrice*fQty, -1) : null;
+      if(st){ st.textContent=`✅ ${name} 추가 완료 — 🔄 시세 갱신으로 현재가를 불러오세요.${cashName?` · ${cashName} 잔액 차감`:''}`; setTimeout(()=>{st.textContent='';},3000); }
     }
+    addTradeLog({name, ticker:tickerVal, type:'buy', at:Date.now(), price:fPrice, quantity:fQty, currency:cur, totalKRW:Math.round(fPrice*fQty*(cur==='USD'?FX.USD:cur==='JPY'?FX.JPY:1)), pnl:null, pnlPct:null, reason:tradeReason, cashAdjusted:cashName});
     resetBuyForm();
     saveAssets();renderAll();
     saveSnap(true); // 매수 시점 수동 스냅샷 (압축 제외)
@@ -1395,7 +1558,7 @@ function executeTrade(){
     const pnl = Math.round((sellPrice - a.avgPrice) * sellQty);
     const sym = CUR_SYM[a.currency];
     saveSnap(true); // 매도 직전 스냅샷 먼저 (종목 제거 전)
-    addSoldHistory(a, sellQty, sellPrice); // 매도 이력 저장
+    logSellTrade(a, sellQty, sellPrice, tradeReason); // 매매 이력 저장 + 현금 자동 가산
     if(sellQty===a.quantity){
       assets = assets.filter(x=>x.id!==assetId);
       selectedAssets.delete(assetId); saveChartSel();
@@ -1434,11 +1597,12 @@ function executeTrade(){
     const newAvg = ((a.avgPrice*a.quantity)+(price*qty))/(a.quantity+qty);
     a.avgPrice  = Math.round(newAvg*100)/100;
     a.quantity += qty;
+    logBuyTrade(a, qty, price, tradeReason); // 매매 이력 저장 + 현금 자동 차감
     saveAssets();renderAll();
     saveSnap(true); // 매수 후 스냅샷
   } else if(mode==='sell'){
     saveSnap(true); // 매도 직전 스냅샷 먼저 (종목 제거 전)
-    addSoldHistory(a, qty, price); // 매도 이력 저장
+    logSellTrade(a, qty, price, tradeReason); // 매매 이력 저장 + 현금 자동 가산
     if(qty===a.quantity){
       assets = assets.filter(x=>x.id!==id);
       selectedAssets.delete(id); saveChartSel();
@@ -1467,6 +1631,7 @@ function confirmDelete(id, name){
     <span style="color:var(--color-tertiary);font-size:11px;">삭제 후 복구가 어렵습니다.</span>`;
   confirmBtn.style.background = 'var(--color-up)';
   confirmBtn.textContent = '삭제 확인';
+  document.getElementById('tc_reason_wrap').style.display='none';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1491,6 +1656,7 @@ function confirmSaveEdit(id){
     <span style="color:var(--color-tertiary);font-size:11px;">위 내용으로 저장하시겠습니까?</span>`;
   confirmBtn.style.background = '#34c759';
   confirmBtn.textContent = '저장 확인';
+  document.getElementById('tc_reason_wrap').style.display='none';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1686,6 +1852,8 @@ function addAsset(){
       : `<span style="color:var(--color-tertiary)">신규 종목 추가</span>`}`;
   confirmBtn.style.background = '#007aff';
   confirmBtn.textContent = '매수 확인';
+  document.getElementById('tc_reason_wrap').style.display='block';
+  document.getElementById('tc_reason').value='';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1717,6 +1885,8 @@ function sellAsset(){
     <span style="color:var(--color-tertiary)">잔여 ${(a.quantity-sellQty).toLocaleString()}주</span>`;
   confirmBtn.style.background = 'var(--color-up)';
   confirmBtn.textContent = '매도 확인';
+  document.getElementById('tc_reason_wrap').style.display='block';
+  document.getElementById('tc_reason').value='';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1768,6 +1938,7 @@ function confirmEditCash(id){
     <span style="color:var(--color-tertiary);font-size:11px;">저장 후 잔액: ${sym}${newAmt.toLocaleString()}</span>`;
   confirmBtn.style.background=modeColors[mode];
   confirmBtn.textContent='확인';
+  document.getElementById('tc_reason_wrap').style.display='none';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -1834,6 +2005,7 @@ function addCash(){
     <span style="color:var(--color-tertiary);font-size:11px;">저장 후 잔액: ${sym}${newAmount.toLocaleString()}</span>`;
   confirmBtn.style.background = modeColors[cashMode];
   confirmBtn.textContent = '확인';
+  document.getElementById('tc_reason_wrap').style.display='none';
   document.getElementById('tradeConfirmModal').classList.add('open');
 }
 
@@ -2905,6 +3077,7 @@ function renderAll(){
 window.addEventListener('resize',()=>drawLineChart());
 
 (async function init(){
+  migrateSoldHistory();
   renderAll();renderSnaps();renderSoldHistory();renderIndices();
 
   // ★ 저장된 기간 탭 활성화 (리프레시 시 유지)
