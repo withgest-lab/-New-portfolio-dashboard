@@ -3009,12 +3009,23 @@ function renderStatBar(){
       const pct = sumVals.length ? sumVals[sumVals.length-1] : 0;
       const hiPct = sumVals.length ? Math.max(...sumVals) : 0;
       const loPct = sumVals.length ? Math.min(...sumVals) : 0;
-      // 금액(고/저)은 실제 평가금액(raw) 기준 표시
-      const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0)).filter(v=>v>0);
-      const hi = rawSum.length?Math.max(...rawSum):0, lo = rawSum.length?Math.min(...rawSum):0;
-      const lastRaw = rawSum.length?rawSum[rawSum.length-1]:0;
-      const firstRaw = rawSum.length?rawSum[0]:0;
-      const diff = lastRaw - firstRaw;
+      // 방식 2: 합계 금액 = Σ(자산별 현재수량 × (현재단가 − 기준단가))
+      let diff = 0;
+      wAssets.forEach(x=>{
+        const rawV = chartHistory.map(h=>h.byAsset[x.id]??null);
+        const fiX = rawV.findIndex(v=>v!=null);
+        if(fiX===-1) return;
+        const cq = x.quantity||1;
+        const pr = chartHistory.map(h=>{
+          const ev=h.byAsset[x.id]; if(ev==null) return null;
+          const q=(h.byQty&&h.byQty[x.id])?h.byQty[x.id]:cq;
+          return ev/q;
+        });
+        const fvp = fiX===0 ? (pr[0]||1) : (x.avgPrice||pr[fiX]||1);
+        const lastP = pr[pr.length-1] ?? pr.filter(v=>v!=null).slice(-1)[0];
+        if(lastP!=null) diff += (lastP - fvp) * cq;
+      });
+      diff = Math.round(diff);
       return '<div class="stat-item">'+
         '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
         '<div class="stat-val '+updn(pct)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
@@ -3058,8 +3069,8 @@ function renderStatBar(){
     const lastPrice = pricesS[pricesS.length-1] ?? pricesS.filter(v=>v!=null).slice(-1)[0];
     const lastPct = lastPrice!=null ? ((lastPrice - fvPrice2)/fvPrice2)*100 : 0;
     const hi = Math.max(...pctVals), lo = Math.min(...pctVals);
-    const lastRaw = rawVals[rawVals.length-1] ?? rawVals.filter(v=>v!=null).slice(-1)[0];
-    const diff = (lastRaw ?? rawVals[fi]) - rawVals[fi];
+    // 방식 2: 현재 보유수량 × (현재단가 − 기준단가) → %와 부호 일치
+    const diff = lastPrice!=null ? Math.round((lastPrice - fvPrice2) * curQty2) : 0;
     const itemColor = LINE_COLS[assets.indexOf(a)%LINE_COLS.length];
 
     return '<div class="stat-item">'+
