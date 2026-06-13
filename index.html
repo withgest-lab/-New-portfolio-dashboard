@@ -302,10 +302,10 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
       <label>보유수량<input id="sf_held" style="width:80px;background:var(--color-section-bg);" readonly></label>
       <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
       <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
-      <button class="btn btn-red" onclick="sellAsset()">− 매도</button>
       <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="sf_reason" placeholder="매도 사유" style="width:100%">
       </label>
+      <button class="btn btn-red" onclick="sellAsset()">− 매도</button>
     </div>
     <!-- 현금 폼 -->
     <div id="form_cash" class="add-form" style="display:none;">
@@ -2179,11 +2179,26 @@ function renderSummary(){
   const pnl  = ev - cost;
   const rtn  = cost > 0 ? (pnl/cost)*100 : 0;
 
-  // 오늘 손익 = 그래프 합계와 완전 동일
-  // prevPrice(기존 종목) / avgPrice(신규 종목) 기준 → 항상 정확
-  const baseTotalForPnl = assets.reduce((s,a)=>s+getBaseEvKRW1D(a), 0) || ev || 1;
-  const todayPnl = ev - baseTotalForPnl;
-  const todayPct = (todayPnl / baseTotalForPnl) * 100;
+  // 오늘 손익 계산: 현재 보유 중인 자산만 기준
+  const currentAssets = assets.filter(a => a.category !== 'cash');
+  const lastSnap = _baseCache;
+  
+  // 현재 보유 자산의 현재 평가액 합계
+  const currentTotal = currentAssets.reduce((s,a)=>s+evKRW(a), 0) || 1;
+  
+  // 현재 보유 자산의 어제 평가액 합계 (마지막 스냅샷 기준)
+  const yesterdayTotal = currentAssets.reduce((s,a)=>{
+    if(lastSnap && lastSnap.byAsset && lastSnap.byQty && lastSnap.byAsset[a.id]){
+      // 어제 기록이 있으면 그 값 사용
+      return s + (lastSnap.byAsset[a.id]||0);
+    } else {
+      // 어제 기록이 없으면 (신규 종목) 현재가 기준
+      return s + evKRW(a);
+    }
+  }, 0) || 1;
+  
+  const todayPnl = currentTotal - yesterdayTotal;
+  const todayPct = (todayPnl / yesterdayTotal) * 100;
 
   document.getElementById('summaryGrid').innerHTML=[
     {lbl:'총 평가금액',  val:fmtEval(ev),                                  sub:'',             cls:''},
