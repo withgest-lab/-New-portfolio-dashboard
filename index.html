@@ -1084,14 +1084,14 @@ function renderSoldHistory(){
     }
     const reasonStr = r.reason ? r.reason : '';
     return `<tr>
-      <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reasonStr.replace(/"/g,'&quot;')}">${reasonStr}</td>
-      <td style="font-size:11px;">${pnlCell}</td>
-      <td style="font-size:11px;color:var(--color-tertiary);">${dtStr}</td>
-      <td style="font-size:12px;font-weight:600;">${r.name}</td>
-      <td>${typeBadge}</td>
-      <td style="font-size:11px;">${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}</td>
-      <td style="font-size:11px;">${fmt(r.totalKRW||0)}</td>
-      <td><button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button></td>
+      <td style="font-size:12px;line-height:1.4;text-align:left;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reasonStr.replace(/"/g,'&quot;')}">${reasonStr||'—'}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:right;">${pnlCell}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:left;color:var(--color-tertiary);">${dtStr}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:left;font-weight:600;">${r.name}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:right;">${typeBadge}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:right;">${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:right;">${fmt(r.totalKRW||0)}</td>
+      <td style="line-height:1.4;text-align:right;"><button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button></td>
     </tr>`;
   }).join('');
 }
