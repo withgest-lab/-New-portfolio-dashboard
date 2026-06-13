@@ -2620,10 +2620,27 @@ function drawLineChart(){
   const lines=[];
 
   if(showSum){
+    // 방식 A: 합계도 개별 자산처럼 "현재 보유 수량 고정 × 당시 단가" 기준
+    // → 매수/매도로 인한 수량 변화가 합계 %를 왜곡하지 않음
+    // 각 시점의 합계 평가금액 = Σ(자산 현재수량 × 당시단가)
+    const sumAssets = assets.filter(a=>a.category!=='cash');
+    const normSum = chartHistory.map((h,idx)=>{
+      let total = 0;
+      let hasAny = false;
+      sumAssets.forEach(a=>{
+        const ev = h.byAsset[a.id];
+        if(ev == null) return;
+        const q = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : (a.quantity||1);
+        const price = ev / q;            // 당시 단가
+        total += price * (a.quantity||1); // 현재 수량 고정
+        hasAny = true;
+      });
+      return hasAny ? total : null;
+    });
+    const fvSum = normSum.find(v=>v!=null && v>0) || 1;
+    const sumVals = normSum.map(v=> v!=null&&v>0 ? ((v-fvSum)/fvSum)*100 : null);
+    // absVals는 실제 평가금액(raw)로 표시 (툴팁/통계용)
     const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    // 기간 무관: 항상 첫 스냅샷값 기준 (단순, 오류 없음)
-    const fvSum = rawSum.find(v=>v>0) || 1;
-    const sumVals = rawSum.map(v=> v!=null&&v>0 ? ((v-fvSum)/fvSum)*100 : null);
     lines.push({label:'합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
@@ -2952,18 +2969,32 @@ function renderStatBar(){
   bar.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:4px;">'+
   items.map(a=>{
     if(!a){
-      // 합계: drawLineChart와 동일한 fvSum 기준
-      const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-      // drawLineChart와 완전 동일: 첫 스냅샷값 기준
-      const fvSum2 = rawSum.find(v=>v>0)||1;
-      const last = rawSum[rawSum.length-1] || fvSum2;
-      const validRaw = rawSum.filter(v=>v>0);
-      const hi = Math.max(...validRaw), lo = Math.min(...validRaw);
+      // 합계: drawLineChart와 동일 — 현재 수량 고정 × 당시 단가 (방식 A)
+      const sumAssets = assets.filter(x=>x.category!=='cash');
+      const normSum = chartHistory.map(h=>{
+        let total = 0; let hasAny = false;
+        sumAssets.forEach(x=>{
+          const ev = h.byAsset[x.id];
+          if(ev == null) return;
+          const q = (h.byQty && h.byQty[x.id]) ? h.byQty[x.id] : (x.quantity||1);
+          total += (ev/q) * (x.quantity||1);
+          hasAny = true;
+        });
+        return hasAny ? total : null;
+      });
+      const validNorm = normSum.filter(v=>v!=null && v>0);
+      const fvSum2 = validNorm.length ? validNorm[0] : 1;
+      const last = normSum.filter(v=>v!=null).slice(-1)[0] || fvSum2;
+      // 고/저는 실제 평가금액(raw) 기준으로 표시
+      const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0)).filter(v=>v>0);
+      const hi = rawSum.length?Math.max(...rawSum):0, lo = rawSum.length?Math.min(...rawSum):0;
       const pct = ((last - fvSum2) / fvSum2) * 100;
-      const diff = last - fvSum2;
+      const lastRaw = rawSum.length?rawSum[rawSum.length-1]:0;
+      const firstRaw = rawSum.length?rawSum[0]:0;
+      const diff = lastRaw - firstRaw;
       return '<div class="stat-item">'+
         '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
-        '<div class="stat-val '+updn(diff)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
+        '<div class="stat-val '+updn(pct)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
         '<div class="stat-sub">고: '+fmt(hi)+' · 저: '+fmt(lo)+'</div>'+
       '</div>';
     }
