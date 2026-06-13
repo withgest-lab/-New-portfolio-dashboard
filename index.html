@@ -167,7 +167,6 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   th,td{padding:7px 4px;}
   .name-main{max-width:100px;font-size:12px;}
   #soldTbody td{padding:4px 3px!important;line-height:1.2!important;font-size:10px!important;}
-  #soldTbody td[style*="max-width:90px"]{max-width:160px!important;}
   .card .tbl-wrap table.table-auto th,
   .card .tbl-wrap table.table-auto td{padding-left:4px;padding-right:4px;}
 }
@@ -303,10 +302,10 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
       <label>보유수량<input id="sf_held" style="width:80px;background:var(--color-section-bg);" readonly></label>
       <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
       <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
-      <label style="flex:1;min-width:140px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
+      <button class="btn btn-red" onclick="sellAsset()">− 매도</button>
+      <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="sf_reason" placeholder="매도 사유" style="width:100%">
       </label>
-      <button class="btn btn-red" onclick="sellAsset()">− 매도</button>
     </div>
     <!-- 현금 폼 -->
     <div id="form_cash" class="add-form" style="display:none;">
@@ -827,6 +826,12 @@ function fmt(n){
   if(abs>=1e4) return (n/1e4).toFixed(1)+'만';
   return Math.round(n).toLocaleString('ko-KR')+'원';
 }
+function fmtEval(n){
+  const abs=Math.abs(n);
+  if(abs>=1e8) return (n/1e8).toFixed(4)+'억';
+  if(abs>=1e4) return (n/1e4).toFixed(1)+'만';
+  return Math.round(n).toLocaleString('ko-KR')+'원';
+}
 function fmtPct(n){return(n>=0?'+':'')+n.toFixed(2)+'%';}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function updn(n){return n>=0?'up':'dn';}
@@ -1162,7 +1167,7 @@ function renderSoldHistory(){
     const reasonStr = r.reason ? r.reason : '';
     let rowHtml = `<tr>
       <td style="font-size:12px;line-height:1.4;text-align:left;color:var(--color-tertiary);">${dtStr}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:left;font-weight:600;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.name.replace(/"/g,'&quot;')}">${r.name}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:left;font-weight:600;white-space:nowrap;">${r.name}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${typeBadge}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${fmt(r.totalKRW||0)}</td>
@@ -2165,6 +2170,10 @@ function addCash(){
    요약 카드
 ════════════════════════════════════════ */
 function renderSummary(){
+  // 어제 기준가 캐시 설정: 마지막 스냅샷
+  const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+  _baseCache = snaps.length>0 ? snaps[snaps.length-1] : null;
+
   const ev   = totalEv();
   const cost = assets.reduce((s,a)=>s+costKRW(a), 0);
   const pnl  = ev - cost;
@@ -2177,7 +2186,7 @@ function renderSummary(){
   const todayPct = (todayPnl / baseTotalForPnl) * 100;
 
   document.getElementById('summaryGrid').innerHTML=[
-    {lbl:'총 평가금액',  val:fmt(ev),                                    sub:'',             cls:''},
+    {lbl:'총 평가금액',  val:fmtEval(ev),                                  sub:'',             cls:''},
     {lbl:'오늘 손익',    val:(todayPnl>=0?'+':'')+fmt(todayPnl),         sub:fmtPct(todayPct), cls:updn(todayPnl)},
     {lbl:'총 평가손익',  val:(pnl>=0?'+':'')+fmt(pnl),                   sub:'원금 '+fmt(cost),cls:updn(pnl)},
     {lbl:'수익률',       val:fmtPct(rtn),                                sub:'',             cls:updn(rtn)},
@@ -2420,15 +2429,20 @@ function _getExistingIds(){
   return _baseCache;
 }
 function getBasePrice(a){
-  if(a.category === 'cash') return a.currentPrice;
-  const existIds = _getExistingIds();
-  if(existIds){
-    // 스냅샷 있음: 포함 여부로 판별
-    return existIds.has(a.id) ? (a.prevPrice||a.currentPrice) : (a.avgPrice||a.currentPrice);
+  // 캐시된 lastSnap이 있으면 거기서 가져오기
+  if(_baseCache && _baseCache.lastSnap){
+    const lastByAsset = _baseCache.lastSnap.byAsset || {};
+    const lastQty = _baseCache.lastSnap.byQty || {};
+    const id = a.id;
+    // 마지막 스냅샷에 이 자산이 있었으면 당시 평단가 복원
+    if(lastByAsset[id] && lastQty[id]){
+      return Math.round(lastByAsset[id] / (lastQty[id]||1));
+    }
   }
-  // 스냅샷 없음: prevPrice로 판별
+  // 캐시 없으면: prevPrice(전일가) 사용, 없으면 현재가
   if(a.prevPrice && a.prevPrice !== a.currentPrice) return a.prevPrice;
-  return a.avgPrice || a.currentPrice;
+  if(a.category === 'cash') return a.currentPrice;
+  return a.currentPrice;
 }
 function getBaseEvKRW1D(a){
   const qty = a.quantity || 1;
