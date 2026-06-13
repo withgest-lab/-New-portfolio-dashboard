@@ -446,6 +446,7 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
         <th>총금액</th>
         <th style="text-align:left">사유</th>
         <th>실현손익</th>
+        <th>편집</th>
         <th>삭제</th>
       </tr></thead>
       <tbody id="soldTbody"></tbody>
@@ -922,6 +923,55 @@ function clearTradeLog(){
   renderSoldHistory();
 }
 
+function toggleTradeLogEdit(id){
+  editingTradeLogId = editingTradeLogId===id ? null : id;
+  renderSoldHistory();
+}
+
+function saveTradeLogEdit(id){
+  const arr = loadTradeLog();
+  const r = arr.find(x=>x.id===id);
+  if(!r) return;
+  const dateV = document.getElementById(`tle_date_${id}`).value;
+  const name  = document.getElementById(`tle_name_${id}`).value.trim();
+  const type  = document.getElementById(`tle_type_${id}`).value;
+  const price = parseFloat(document.getElementById(`tle_price_${id}`).value);
+  const qty   = parseFloat(document.getElementById(`tle_qty_${id}`).value);
+  const reason = document.getElementById(`tle_reason_${id}`).value.trim();
+
+  if(!name){ alert('종목명을 입력해 주세요.'); return; }
+  if(isNaN(price)||price<=0){ alert('체결단가를 입력해 주세요.'); return; }
+  if(isNaN(qty)||qty<=0){ alert('수량을 입력해 주세요.'); return; }
+
+  if(dateV) r.at = new Date(dateV+'T00:00:00').getTime();
+  r.name = name;
+  r.type = type;
+  r.price = price;
+  r.quantity = qty;
+  r.reason = reason;
+  const fxRate = r.currency==='USD'?FX.USD:r.currency==='JPY'?FX.JPY:1;
+  r.totalKRW = Math.round(price*qty*fxRate);
+
+  // 매도이면서 평단가를 알 수 있는 경우(자산목록에 같은 이름의 종목이 있으면 그 평단가로 손익 재계산)
+  if(type==='sell'){
+    const asset = assets.find(a=>a.name===name);
+    if(asset){
+      const pnl = (price-asset.avgPrice)*qty*fxRate;
+      const pnlPct = asset.avgPrice>0?((price-asset.avgPrice)/asset.avgPrice)*100:null;
+      r.pnl = Math.round(pnl);
+      r.pnlPct = pnlPct===null?null:Math.round(pnlPct*100)/100;
+    }
+    // 자산정보 없으면 기존 pnl/pnlPct 값 유지
+  } else {
+    r.pnl = null;
+    r.pnlPct = null;
+  }
+
+  saveTradeLog(arr);
+  editingTradeLogId = null;
+  renderSoldHistory();
+}
+
 // 매도 시 매매 이력 자동 기록 (실현손익 계산 포함) + 현금 자동 가산
 function logSellTrade(a, qty, sellPrice, reason){
   const fxRate = a.currency==='USD'?FX.USD:a.currency==='JPY'?FX.JPY:1;
@@ -1079,7 +1129,7 @@ function renderSoldHistory(){
   if(!el) return;
   const arr = loadTradeLog();
   if(!arr.length){
-    el.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--color-tertiary);">매매 이력 없음</td></tr>`;
+    el.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:16px;color:var(--color-tertiary);">매매 이력 없음</td></tr>`;
     const total = document.getElementById('soldTotal');
     if(total) total.style.display='none';
     return;
@@ -1107,7 +1157,7 @@ function renderSoldHistory(){
       pnlCell = `<span class="${r.pnl>=0?'color-up':'color-dn'}" style="font-weight:600;">${r.pnl>=0?'+':''}${fmt(r.pnl)}${pctStr}</span>`;
     }
     const reasonStr = r.reason ? r.reason : '';
-    return `<tr>
+    let rowHtml = `<tr>
       <td style="font-size:12px;line-height:1.4;text-align:left;color:var(--color-tertiary);">${dtStr}</td>
       <td style="font-size:12px;line-height:1.4;text-align:left;font-weight:600;">${r.name}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${typeBadge}</td>
@@ -1115,8 +1165,66 @@ function renderSoldHistory(){
       <td style="font-size:12px;line-height:1.4;text-align:right;">${fmt(r.totalKRW||0)}</td>
       <td style="font-size:12px;line-height:1.4;text-align:left;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${reasonStr.replace(/"/g,'&quot;')}">${reasonStr||'—'}</td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${pnlCell}</td>
+      <td style="line-height:1.4;text-align:right;"><button class="btn-icon" onclick="toggleTradeLogEdit('${r.id}')">✏️</button></td>
       <td style="line-height:1.4;text-align:right;"><button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button></td>
     </tr>`;
+
+    if(editingTradeLogId===r.id){
+      const dateVal = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      rowHtml += `<tr style="background:#f0fff4;">
+        <td colspan="9" style="padding:14px 16px;" onclick="event.stopPropagation()">
+          <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
+            ✏️ 매매 이력 수정
+            <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
+              ${r.name} · 날짜/종목/구분/체결단가/수량/사유를 수정합니다
+            </span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              날짜
+              <input id="tle_date_${r.id}" type="date" value="${dateVal}"
+                style="width:130px;border:1px solid #34c75960;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;">
+            </label>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              종목명
+              <input id="tle_name_${r.id}" value="${r.name.replace(/"/g,'&quot;')}"
+                style="width:130px;border:1px solid #34c75960;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;">
+            </label>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              구분
+              <select id="tle_type_${r.id}"
+                style="border:1px solid #34c75960;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;background:var(--color-card);color:var(--color-text);">
+                <option value="buy"  ${r.type==='buy' ?'selected':''}>매수</option>
+                <option value="sell" ${r.type==='sell'?'selected':''}>매도</option>
+              </select>
+            </label>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              체결단가 (${r.currency})
+              <input id="tle_price_${r.id}" type="number" value="${r.price}"
+                style="width:110px;border:1px solid #34c75960;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;">
+            </label>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+              수량
+              <input id="tle_qty_${r.id}" type="number" value="${r.quantity}"
+                style="width:90px;border:1px solid #34c75960;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;">
+            </label>
+            <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;flex:1;min-width:160px;">
+              사유
+              <input id="tle_reason_${r.id}" value="${reasonStr.replace(/"/g,'&quot;')}"
+                style="width:100%;border:1px solid #34c75960;border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;">
+            </label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn"
+                style="background:#34c759;color:#fff;padding:7px 16px;font-size:13px;box-shadow:0 2px 8px #34c75930;"
+                onclick="saveTradeLogEdit('${r.id}')">✓ 수정저장</button>
+              <button class="btn btn-ghost" style="padding:7px 12px;font-size:13px;"
+                onclick="editingTradeLogId=null;renderSoldHistory();">✕ 닫기</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+    }
+    return rowHtml;
   }).join('');
 }
 
@@ -1175,6 +1283,7 @@ function renderSnaps(){
    자산 목록
 ════════════════════════════════════════ */
 let editingId=null, quickTradeId=null;
+let editingTradeLogId=null;
 
 function renderTable(){
   const tb=document.getElementById('assetTbody');
