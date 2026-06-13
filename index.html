@@ -239,7 +239,7 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     <table>
       <thead><tr>
         <th>종목</th>
-        <th>구분</th><th>현재가</th><th>전일比</th>
+        <th>구분</th><th>속성</th><th>현재가</th><th>전일比</th>
         <th>평균단가</th><th>수량</th>
         <th>투자원금</th><th>평가금액</th>
         <th>평가손익</th><th>수익률</th><th>편집</th>
@@ -363,12 +363,11 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
 <div class="card">
   <div class="section-label">비중 현황</div>
   <div style="display:flex;gap:16px;flex-wrap:wrap;">
-    <!-- 왼쪽 50%: 도넛 + 작은 legend -->
+    <!-- 왼쪽: 카테고리 구분 도넛 -->
     <div style="flex:1;min-width:260px;display:flex;flex-direction:column;align-items:center;">
       <div style="font-size:10px;font-weight:600;color:var(--color-tertiary);text-align:center;
-                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">카테고리 비중</div>
+                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">카테고리 구분</div>
       <div style="display:flex;gap:12px;align-items:center;justify-content:center;">
-        <!-- 도넛 -->
         <div class="donut-canvas-wrap">
           <canvas id="catDonut" width="200" height="200"></canvas>
           <div class="donut-center">
@@ -376,16 +375,30 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
             <div class="dc-val" id="catCenter">—</div>
           </div>
         </div>
-        <!-- 작은 legend -->
         <div id="catLegend" style="display:flex;flex-direction:column;gap:6px;justify-content:center;"></div>
       </div>
     </div>
-    <!-- 오른쪽 50%: 종목 막대그래프 -->
-    <div style="flex:1;min-width:260px;display:flex;flex-direction:column;">
+    <!-- 오른쪽: 카테고리 속성 도넛 -->
+    <div style="flex:1;min-width:260px;display:flex;flex-direction:column;align-items:center;">
       <div style="font-size:10px;font-weight:600;color:var(--color-tertiary);text-align:center;
-                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">종목 비중</div>
-      <div id="barChart" style="flex:1;"></div>
+                  text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">카테고리 속성</div>
+      <div style="display:flex;gap:12px;align-items:center;justify-content:center;">
+        <div class="donut-canvas-wrap">
+          <canvas id="attrDonut" width="200" height="200"></canvas>
+          <div class="donut-center">
+            <div class="dc-lbl">총 자산</div>
+            <div class="dc-val" id="attrCenter">—</div>
+          </div>
+        </div>
+        <div id="attrLegend" style="display:flex;flex-direction:column;gap:6px;justify-content:center;"></div>
+      </div>
     </div>
+  </div>
+  <!-- 하단: 종목 비중 (가로 전체) -->
+  <div style="margin-top:20px;">
+    <div style="font-size:10px;font-weight:600;color:var(--color-tertiary);text-align:center;
+                text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">종목 비중</div>
+    <div id="barChart"></div>
   </div>
 </div>
 
@@ -535,6 +548,8 @@ const LINE_COLS = [
 const CAT_COLS   = {stock_kr:'#007aff',stock_us:'#ff9500',stock_jp:'#30b0c7',pension_personal:'#af52de',pension_retirement:'#34c759',irp:'#5856d6',isa:'#00b5ad',crypto:'#ff3b30',cash:'#8e8e93'};
 const ASSET_COLS = ['#5ac8fa','#ffd60a','#30d158','#bf5af2','#ff6961','#32ade6','#ff375f','#6ac4dc','#c8a96e','#aeaeb2'];
 const CAT_LABELS = {stock_kr:'국내주식',stock_us:'미국주식',stock_jp:'일본주식',pension_personal:'개인연금',pension_retirement:'퇴직연금',irp:'IRP 개인',isa:'ISA',crypto:'가상자산',cash:'현금'};
+const ATTR_OPTIONS = ['Core','주도주','유망주','원자재'];
+const ATTR_COLS = {'Core':'#0a84ff','주도주':'#ff9500','유망주':'#34c759','원자재':'#a2845e','현금':'#8e8e93','미지정':'#c7c7cc'};
 const CUR_SYM    = {KRW:'₩',USD:'$',JPY:'¥'};
 const SNAP_KEY    = 'pf_snaps_v5';
 const ASSETS_KEY  = 'pf_assets_v1';
@@ -1353,6 +1368,7 @@ function renderTable(){
         <div class="name-sub">${a.ticker==='—'?'현금':a.ticker}</div>
       </td>
       <td><span class="cat-badge" style="background:${cc}20;color:${cc}">${tableBadge(a)}</span></td>
+      <td>${a.attribute?`<span class="cat-badge" style="background:${ATTR_COLS[a.attribute]||'#8e8e93'}20;color:${ATTR_COLS[a.attribute]||'#8e8e93'}">${a.attribute}</span>`:'<span style="color:var(--color-tertiary);font-size:11px;">—</span>'}</td>
       <td style="font-size:11px;">${a.category==='cash'?cashPriceDisplay:priceDisplay}</td>
       <td style="font-size:11px;">${dayChgCell}</td>
       <td style="font-size:11px;">${priceStr(a.avgPrice)}</td>
@@ -1380,7 +1396,7 @@ function renderTable(){
     // 거래 패널 (행 클릭) - 매수/매도
     if(quickTradeId===a.id){
       rows+=`<tr style="background:#f0f7ff;">
-        <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
+        <td colspan="12" style="padding:14px 16px;" onclick="event.stopPropagation()">
           <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#007aff;">
             ⚡ 빠른 거래
             <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
@@ -1422,7 +1438,7 @@ function renderTable(){
         // ── 현금 전용: 잔액설정 / 입금 / 출금 ──
         const sym=CUR_SYM[a.currency];
         rows+=`<tr style="background:#f0fff4;">
-          <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
+          <td colspan="12" style="padding:14px 16px;" onclick="event.stopPropagation()">
             <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
               ✏️ 현금 수정
               <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
@@ -1463,7 +1479,7 @@ function renderTable(){
       } else {
         // ── 일반 종목: 수량 / 평균단가 / 구분 ──
         rows+=`<tr style="background:#f0fff4;">
-          <td colspan="11" style="padding:14px 16px;" onclick="event.stopPropagation()">
+          <td colspan="12" style="padding:14px 16px;" onclick="event.stopPropagation()">
             <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
               ✏️ 종목 수정
               <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
@@ -1497,6 +1513,18 @@ function renderTable(){
                   <option value="isa"       ${a.category==='isa'      ?'selected':''}>ISA</option>
                   <option value="crypto"    ${a.category==='crypto'   ?'selected':''}>가상자산</option>
                   <option value="cash"      ${a.category==='cash'     ?'selected':''}>현금</option>
+                </select>
+              </label>
+              <label style="font-size:10px;color:var(--color-tertiary);display:flex;flex-direction:column;gap:3px;">
+                속성
+                <select id="tp_attr_${a.id}"
+                  style="border:1px solid #34c75960;border-radius:8px;padding:6px 10px;
+                         font-size:13px;font-family:inherit;background:var(--color-card);color:var(--color-text);">
+                  <option value="" ${!a.attribute?'selected':''}>— 없음 —</option>
+                  <option value="Core"   ${a.attribute==='Core'  ?'selected':''}>Core</option>
+                  <option value="주도주" ${a.attribute==='주도주'?'selected':''}>주도주</option>
+                  <option value="유망주" ${a.attribute==='유망주'?'selected':''}>유망주</option>
+                  <option value="원자재" ${a.attribute==='원자재'?'selected':''}>원자재</option>
                 </select>
               </label>
               <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -1676,6 +1704,7 @@ function executeTrade(){
     if(!isNaN(qty)&&qty>=0)    a.quantity = qty;
     if(!isNaN(price)&&price>0) a.avgPrice = price;
     if(trade.cat)              a.category = trade.cat;
+    if(trade.attr !== undefined) a.attribute = trade.attr || null;
     editingId=null; quickTradeId=null;
     saveAssets();renderAll();
     return;
@@ -1798,9 +1827,11 @@ function confirmSaveEdit(id){
   const qty   = parseFloat(document.getElementById(`tp_qty_${id}`)?.value);
   const price = parseFloat(document.getElementById(`tp_price_${id}`)?.value);
   const cat   = document.getElementById(`tp_cat_${id}`)?.value || a.category;
-  pendingTrade = {id, mode:'edit', qty, price, cat};
+  const attr  = document.getElementById(`tp_attr_${id}`)?.value ?? a.attribute ?? '';
+  pendingTrade = {id, mode:'edit', qty, price, cat, attr};
   const sym = CUR_SYM[a.currency];
   const catChanged = cat !== a.category;
+  const attrChanged = attr !== (a.attribute||'');
   const titleEl   = document.getElementById('tc_title');
   const detailEl  = document.getElementById('tc_detail');
   const confirmBtn = document.getElementById('tc_confirm');
@@ -1810,6 +1841,7 @@ function confirmSaveEdit(id){
     수량: ${!isNaN(qty)?qty.toLocaleString():'변경없음'}<br>
     평균단가: ${!isNaN(price)?sym+price.toLocaleString():'변경없음'}<br>
     구분: ${catChanged?`${CAT_LABELS[a.category]} → <b>${CAT_LABELS[cat]}</b>`:'변경없음'}<br>
+    속성: ${attrChanged?`${a.attribute||'없음'} → <b>${attr||'없음'}</b>`:'변경없음'}<br>
     <span style="color:var(--color-tertiary);font-size:11px;">위 내용으로 저장하시겠습니까?</span>`;
   confirmBtn.style.background = '#34c759';
   confirmBtn.textContent = '저장 확인';
@@ -2267,6 +2299,30 @@ function renderDonuts(){
   // legend: 색상 바 + 카테고리명 | % | 금액 → 한 줄에 모두 표시
   document.getElementById('catLegend').innerHTML=catData.map(d=>{
     const pct=total>0?((d.value/total)*100):0;
+    return`<div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-bottom:1px solid var(--color-section-bg);">
+      <div style="width:3px;height:28px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:9px;font-weight:700;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.label}</div>
+        <div style="font-size:9px;color:var(--color-tertiary);margin-top:1px;">${fmt(d.value)}</div>
+      </div>
+      <div style="font-size:10px;font-weight:800;color:${d.color};flex-shrink:0;min-width:34px;text-align:right;">${pct.toFixed(1)}%</div>
+    </div>`;
+  }).join('');
+
+  // ── 속성 도넛 ──
+  const attrMap = {};
+  assets.forEach(a=>{
+    const k = a.category==='cash' ? '현금' : (a.attribute || '미지정');
+    attrMap[k] = (attrMap[k]||0) + evKRW(a);
+  });
+  const attrTotal = Object.values(attrMap).reduce((s,v)=>s+v,0);
+  const attrData = Object.entries(attrMap)
+    .map(([k,v])=>({label:k, value:v, color:ATTR_COLS[k]||'#8e8e93'}))
+    .sort((a,b)=>b.value-a.value);
+  drawDonut('attrDonut', attrData);
+  document.getElementById('attrCenter').textContent=fmt(attrTotal);
+  document.getElementById('attrLegend').innerHTML=attrData.map(d=>{
+    const pct=attrTotal>0?((d.value/attrTotal)*100):0;
     return`<div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-bottom:1px solid var(--color-section-bg);">
       <div style="width:3px;height:28px;border-radius:2px;background:${d.color};flex-shrink:0;"></div>
       <div style="flex:1;min-width:0;">
