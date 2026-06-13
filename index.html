@@ -2619,34 +2619,11 @@ function drawLineChart(){
 
   const lines=[];
 
-  if(showSum){
-    // 방식 A: 합계도 개별 자산처럼 "현재 보유 수량 고정 × 당시 단가" 기준
-    // → 매수/매도로 인한 수량 변화가 합계 %를 왜곡하지 않음
-    // 각 시점의 합계 평가금액 = Σ(자산 현재수량 × 당시단가)
-    const sumAssets = assets.filter(a=>a.category!=='cash');
-    const normSum = chartHistory.map((h,idx)=>{
-      let total = 0;
-      let hasAny = false;
-      sumAssets.forEach(a=>{
-        const ev = h.byAsset[a.id];
-        if(ev == null) return;
-        const q = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : (a.quantity||1);
-        const price = ev / q;            // 당시 단가
-        total += price * (a.quantity||1); // 현재 수량 고정
-        hasAny = true;
-      });
-      return hasAny ? total : null;
-    });
-    const fvSum = normSum.find(v=>v!=null && v>0) || 1;
-    const sumVals = normSum.map(v=> v!=null&&v>0 ? ((v-fvSum)/fvSum)*100 : null);
-    // absVals는 실제 평가금액(raw)로 표시 (툴팁/통계용)
-    const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    lines.push({label:'합계', vals:sumVals, absVals:rawSum,
-      color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
-  }
+  // 합계는 개별 자산 pct 계산 후 가중평균으로 계산 (아래에서)
+  // 각 자산의 pct 배열을 모아둘 맵
+  const assetPctMap = {}; // {assetId: pct배열}
 
   assets.forEach((a,i)=>{
-    if(!selectedAssets.has(a.id)) return;
     if(a.category==='cash') return;
 
     const raw = chartHistory.map(h=> h.byAsset[a.id] ?? null);
@@ -2685,10 +2662,41 @@ function drawLineChart(){
         events.push({idx:j, type:jump>0?'buy':'sell', jump, qty:null, amt:diff||null});
       }
     }
-    const col = LINE_COLS[i%LINE_COLS.length];
-    lines.push({label:a.name, vals:pct, absVals:raw,
-      color:col, lw:1.2, assetId:a.id, events});
+    // 합계 가중평균용으로 모든 자산의 pct 저장 (선택 여부 무관)
+    assetPctMap[a.id] = pct;
+    // 화면 라인은 선택된 자산만 추가
+    if(selectedAssets.has(a.id)){
+      const col = LINE_COLS[i%LINE_COLS.length];
+      lines.push({label:a.name, vals:pct, absVals:raw,
+        color:col, lw:1.2, assetId:a.id, events});
+    }
   });
+
+  // ── 합계: 자산별 pct의 현재평가금액 가중평균 ──
+  // 매수/매도/현금 변화에 영향받지 않는 순수 수익률
+  if(showSum){
+    const sumAssets = assets.filter(a=>a.category!=='cash' && assetPctMap[a.id]);
+    // 현재 평가금액 가중치
+    const weights = {};
+    let totalWeight = 0;
+    sumAssets.forEach(a=>{ const w = evKRW(a); weights[a.id]=w; totalWeight+=w; });
+    if(totalWeight<=0) totalWeight = 1;
+
+    const sumVals = chartHistory.map((h,idx)=>{
+      let acc = 0, wsum = 0;
+      sumAssets.forEach(a=>{
+        const pv = assetPctMap[a.id][idx];
+        if(pv==null) return;            // 그 시점 데이터 없는 자산 제외
+        acc  += pv * weights[a.id];
+        wsum += weights[a.id];
+      });
+      if(wsum<=0) return null;
+      return acc / wsum;               // 가중평균 (정규화)
+    });
+    const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
+    lines.unshift({label:'합계', vals:sumVals, absVals:rawSum,
+      color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
+  }
   if(!lines.length) return;
 
   const allPct=lines.flatMap(l=>l.vals).filter(v=>v!=null&&isFinite(v));
@@ -2969,33 +2977,48 @@ function renderStatBar(){
   bar.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:4px;">'+
   items.map(a=>{
     if(!a){
-      // 합계: drawLineChart와 동일 — 현재 수량 고정 × 당시 단가 (방식 A)
+      // 합계: drawLineChart와 동일 — 자산별 pct의 현재평가금액 가중평균
       const sumAssets = assets.filter(x=>x.category!=='cash');
-      const normSum = chartHistory.map(h=>{
-        let total = 0; let hasAny = false;
-        sumAssets.forEach(x=>{
-          const ev = h.byAsset[x.id];
-          if(ev == null) return;
-          const q = (h.byQty && h.byQty[x.id]) ? h.byQty[x.id] : (x.quantity||1);
-          total += (ev/q) * (x.quantity||1);
-          hasAny = true;
+      // 각 자산의 pct 배열 계산 (단가 기준)
+      const pctMap = {};
+      sumAssets.forEach(x=>{
+        const rawV = chartHistory.map(h=>h.byAsset[x.id]??null);
+        const fiX = rawV.findIndex(v=>v!=null);
+        if(fiX===-1) return;
+        const cq = x.quantity||1;
+        const pr = chartHistory.map(h=>{
+          const ev=h.byAsset[x.id]; if(ev==null) return null;
+          const q=(h.byQty&&h.byQty[x.id])?h.byQty[x.id]:cq;
+          return ev/q;
         });
-        return hasAny ? total : null;
+        const fvp = fiX===0 ? (pr[0]||1) : (x.avgPrice||pr[fiX]||1);
+        pctMap[x.id] = pr.map((p,idx)=> (idx<fiX||p==null)?null:((p-fvp)/fvp)*100);
       });
-      const validNorm = normSum.filter(v=>v!=null && v>0);
-      const fvSum2 = validNorm.length ? validNorm[0] : 1;
-      const last = normSum.filter(v=>v!=null).slice(-1)[0] || fvSum2;
-      // 고/저는 실제 평가금액(raw) 기준으로 표시
+      const wAssets = sumAssets.filter(x=>pctMap[x.id]);
+      const weights = {}; let totalW=0;
+      wAssets.forEach(x=>{ const w=evKRW(x); weights[x.id]=w; totalW+=w; });
+      if(totalW<=0) totalW=1;
+      const sumVals = chartHistory.map((h,idx)=>{
+        let acc=0,wsum=0;
+        wAssets.forEach(x=>{
+          const pv=pctMap[x.id][idx]; if(pv==null) return;
+          acc+=pv*weights[x.id]; wsum+=weights[x.id];
+        });
+        return wsum<=0?null:acc/wsum;
+      }).filter(v=>v!=null);
+      const pct = sumVals.length ? sumVals[sumVals.length-1] : 0;
+      const hiPct = sumVals.length ? Math.max(...sumVals) : 0;
+      const loPct = sumVals.length ? Math.min(...sumVals) : 0;
+      // 금액(고/저)은 실제 평가금액(raw) 기준 표시
       const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0)).filter(v=>v>0);
       const hi = rawSum.length?Math.max(...rawSum):0, lo = rawSum.length?Math.min(...rawSum):0;
-      const pct = ((last - fvSum2) / fvSum2) * 100;
       const lastRaw = rawSum.length?rawSum[rawSum.length-1]:0;
       const firstRaw = rawSum.length?rawSum[0]:0;
       const diff = lastRaw - firstRaw;
       return '<div class="stat-item">'+
         '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
         '<div class="stat-val '+updn(pct)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
-        '<div class="stat-sub">고: '+fmt(hi)+' · 저: '+fmt(lo)+'</div>'+
+        '<div class="stat-sub">고: '+fmtPct(hiPct)+' · 저: '+fmtPct(loPct)+'</div>'+
       '</div>';
     }
 
