@@ -2386,18 +2386,20 @@ if(selectedAssets.size===0 && !showSum){
 
 function getPeriodStart(period){
   const now = new Date();
+  const dst = isUSDST();
+  const usH = dst ? 22 : 23; // 미국장 시작 시간
 
   if(period==='1D'){
-    // 오늘 오전 9시 (한국장 개장) 기준
+    // 어제 미국장 시작 시각 (22:30 or 23:30)
     const t = new Date(now);
-    t.setHours(9, 0, 0, 0);
-    if(now < t) t.setDate(t.getDate()-1); // 아직 9시 전이면 어제 9시
+    t.setHours(usH, 30, 0, 0);
+    if(now < t) t.setDate(t.getDate()-1);
     return t;
   }
   if(period==='5D'){
-    // 영업일(주말 제외) 5일 전 오전 9시
+    // 오늘 포함 워킹데이 5일 전 미국장 시작 시각
     const t = new Date(now);
-    t.setHours(9, 0, 0, 0);
+    t.setHours(usH, 30, 0, 0);
     if(now < t) t.setDate(t.getDate()-1);
     let count = 4;
     while(count > 0){
@@ -2407,17 +2409,17 @@ function getPeriodStart(period){
     }
     return t;
   }
-  if(period==='1M')  return new Date(now.getFullYear(), now.getMonth()-1,   now.getDate(), 9,0,0);
-  if(period==='3M')  return new Date(now.getFullYear(), now.getMonth()-3,   now.getDate(), 9,0,0);
-  if(period==='6M')  return new Date(now.getFullYear(), now.getMonth()-6,   now.getDate(), 9,0,0);
-  if(period==='YTD') return new Date(now.getFullYear(), 0, 1, 9,0,0);
-  if(period==='1Y')  return new Date(now.getFullYear()-1, now.getMonth(),   now.getDate(), 9,0,0);
-  if(period==='3Y')  return new Date(now.getFullYear()-3, now.getMonth(),   now.getDate(), 9,0,0);
-  if(period==='5Y')  return new Date(now.getFullYear()-5, now.getMonth(),   now.getDate(), 9,0,0);
+  if(period==='1M')  return new Date(now.getFullYear(), now.getMonth()-1,   now.getDate(), 6,5,0);
+  if(period==='3M')  return new Date(now.getFullYear(), now.getMonth()-3,   now.getDate(), 6,5,0);
+  if(period==='6M')  return new Date(now.getFullYear(), now.getMonth()-6,   now.getDate(), 6,5,0);
+  if(period==='YTD') return new Date(now.getFullYear(), 0, 1, 6,5,0);
+  if(period==='1Y')  return new Date(now.getFullYear()-1, now.getMonth(),   now.getDate(), 6,5,0);
+  if(period==='3Y')  return new Date(now.getFullYear()-3, now.getMonth(),   now.getDate(), 6,5,0);
+  if(period==='5Y')  return new Date(now.getFullYear()-5, now.getMonth(),   now.getDate(), 6,5,0);
   // ALL
   const snaps = loadSnaps();
   if(snaps.length) return new Date(Math.min(...snaps.map(s=>s.timestamp)));
-  return new Date(now.getFullYear()-5, now.getMonth(), now.getDate(), 9,0,0);
+  return new Date(now.getFullYear()-5, now.getMonth(), now.getDate(), 6,5,0);
 }
 
 // ── 기준 평가금액 계산 ──
