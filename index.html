@@ -471,15 +471,15 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   </div>
   <div id="soldTotal" style="display:none;padding:8px 0 4px;font-size:13px;color:var(--color-secondary);"></div>
   <div class="add-form" style="padding-top:14px;">
-    <label>날짜<input id="tl_date" type="date" style="width:130px"></label>
+    <label>날짜<input id="tl_date" type="date" style="width:120px"></label>
     <label>종목명
-      <input id="tl_name" placeholder="" style="width:130px" autocomplete="off">
+      <input id="tl_name" placeholder="" style="width:110px" autocomplete="off">
     </label>
-    <label>유형<select id="tl_type">
+    <label>유형<select id="tl_type" style="width:70px">
       <option value="buy">매수</option>
       <option value="sell">매도</option>
     </select></label>
-    <label>구분<select id="tl_cat">
+    <label>구분<select id="tl_cat" style="width:90px">
       <option value="">-- 선택 --</option>
       <option value="stock_kr">국내주식</option>
       <option value="stock_us">미국주식</option>
@@ -491,15 +491,15 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
       <option value="crypto">가상자산</option>
       <option value="cash">현금</option>
     </select></label>
-    <label>속성<select id="tl_attr">
+    <label>속성<select id="tl_attr" style="width:80px">
       <option value="">— 없음 —</option>
       <option value="Core">Core</option>
       <option value="주도주">주도주</option>
       <option value="유망주">유망주</option>
       <option value="원자재">원자재</option>
     </select></label>
-    <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:100px"></label>
-    <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:80px"></label>
+    <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:85px"></label>
+    <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:70px"></label>
     <div style="flex:1 1 100%;display:flex;gap:10px;align-items:flex-end;">
       <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
