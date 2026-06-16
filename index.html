@@ -513,14 +513,10 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
       <thead><tr>
         <th style="text-align:left">날짜</th>
         <th style="text-align:left">종목</th>
-        <th>유형</th>
-        <th>구분</th>
-        <th>속성</th>
-        <th>체결단가 × 수량</th>
-        <th>총금액</th>
+        <th>유형<br><span style="font-weight:400;text-transform:none;">구분·속성</span></th>
+        <th>체결단가 × 수량<br><span style="font-weight:400;text-transform:none;">총금액</span></th>
         <th>실현손익</th>
-        <th>편집</th>
-        <th>삭제</th>
+        <th>관리</th>
       </tr></thead>
       <tbody id="soldTbody"></tbody>
     </table>
@@ -1227,7 +1223,7 @@ function renderSoldHistory(){
   if(!el) return;
   const arr = loadTradeLog();
   if(!arr.length){
-    el.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--color-tertiary);">매매 이력 없음</td></tr>`;
+    el.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--color-tertiary);">매매 이력 없음</td></tr>`;
     const total = document.getElementById('soldTotal');
     if(total) total.style.display='none';
     return;
@@ -1257,28 +1253,36 @@ function renderSoldHistory(){
     const reasonStr = r.reason ? r.reason : '';
     const catLabel = r.category ? (CAT_LABELS[r.category]||r.category) : '';
     const catCol = r.category ? (CAT_COLS[r.category]||'#8e8e93') : '#8e8e93';
-    const catCell = r.category
-      ? `<span class="cat-badge" style="background:${catCol}20;color:${catCol}">${catLabel}</span>`
-      : '<span style="color:var(--color-tertiary);font-size:11px;">—</span>';
-    const attrCell = r.attribute
-      ? `<span class="cat-badge" style="background:${ATTR_COLS[r.attribute]||'#8e8e93'}20;color:${ATTR_COLS[r.attribute]||'#8e8e93'}">${r.attribute}</span>`
-      : '<span style="color:var(--color-tertiary);font-size:11px;">—</span>';
+    const catBadge = r.category
+      ? `<span class="cat-badge" style="background:${catCol}20;color:${catCol};font-size:9px;">${catLabel}</span>`
+      : '';
+    const attrBadge = r.attribute
+      ? `<span class="cat-badge" style="background:${ATTR_COLS[r.attribute]||'#8e8e93'}20;color:${ATTR_COLS[r.attribute]||'#8e8e93'};font-size:9px;">${r.attribute}</span>`
+      : '';
+    const catAttrLine = (catBadge||attrBadge)
+      ? `<div style="margin-top:2px;display:flex;gap:3px;justify-content:center;flex-wrap:wrap;">${catBadge}${attrBadge}</div>`
+      : `<div style="margin-top:2px;color:var(--color-tertiary);font-size:10px;">—</div>`;
     let rowHtml = `<tr>
       <td style="font-size:12px;line-height:1.4;text-align:left;color:var(--color-tertiary);">${dtStr}</td>
       <td style="font-size:12px;line-height:1.4;text-align:left;font-weight:600;white-space:nowrap;">${r.name}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:right;">${typeBadge}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:center;">${catCell}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:center;">${attrCell}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:right;">${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}</td>
-      <td style="font-size:12px;line-height:1.4;text-align:right;">${fmt(r.totalKRW||0)}</td>
+      <td style="font-size:12px;line-height:1.4;text-align:center;">
+        ${typeBadge}
+        ${catAttrLine}
+      </td>
+      <td style="font-size:12px;line-height:1.4;text-align:right;">
+        ${sym}${(r.price||0).toLocaleString()} × ${(r.quantity||0).toLocaleString()}
+        <div style="font-size:10px;color:var(--color-tertiary);margin-top:1px;">${fmt(r.totalKRW||0)}</div>
+      </td>
       <td style="font-size:12px;line-height:1.4;text-align:right;">${pnlCell}</td>
-      <td style="line-height:1.4;text-align:right;"><button class="btn-icon" onclick="toggleTradeLogEdit('${r.id}')">✏️</button></td>
-      <td style="line-height:1.4;text-align:right;"><button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button></td>
+      <td style="line-height:1.4;text-align:right;white-space:nowrap;">
+        <button class="btn-icon" onclick="toggleTradeLogEdit('${r.id}')">✏️</button>
+        <button class="btn-icon" onclick="deleteSoldHistory('${r.id}')">🗑</button>
+      </td>
     </tr>`;
 
     if(reasonStr){
       rowHtml += `<tr>
-        <td colspan="10" style="padding:0 4px 6px;border-bottom:1px solid #f2f2f7;font-size:11px;color:var(--color-tertiary);text-align:left;white-space:normal;">
+        <td colspan="6" style="padding:0 4px 6px;border-bottom:1px solid #f2f2f7;font-size:11px;color:var(--color-tertiary);text-align:left;white-space:normal;">
           💬 ${reasonStr.replace(/</g,'&lt;')}
         </td>
       </tr>`;
@@ -1287,7 +1291,7 @@ function renderSoldHistory(){
     if(editingTradeLogId===r.id){
       const dateVal = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
       rowHtml += `<tr style="background:#f0fff4;">
-        <td colspan="10" style="padding:14px 16px;" onclick="event.stopPropagation()">
+        <td colspan="6" style="padding:14px 16px;" onclick="event.stopPropagation()">
           <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:#34c759;">
             ✏️ 매매 이력 수정
             <span style="font-size:10px;color:var(--color-tertiary);font-weight:400;margin-left:6px;">
