@@ -289,19 +289,19 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
         <option value="crypto">가상자산</option>
         <option value="cash">현금</option>
       </select></label>
-      <label>수량<input id="af_qty" type="number" placeholder="" style="width:80px"></label>
-      <label>단가<input id="af_price" type="number" placeholder="" style="width:100px"></label>
-      <label>통화<select id="af_cur">
-        <option value="KRW">KRW ₩</option>
-        <option value="USD">USD $</option>
-        <option value="JPY">JPY ¥</option>
-      </select></label>
       <label>속성<select id="af_attr">
         <option value="">— 없음 —</option>
         <option value="Core">Core</option>
         <option value="주도주">주도주</option>
         <option value="유망주">유망주</option>
         <option value="원자재">원자재</option>
+      </select></label>
+      <label>수량<input id="af_qty" type="number" placeholder="" style="width:80px"></label>
+      <label>단가<input id="af_price" type="number" placeholder="" style="width:100px"></label>
+      <label>통화<select id="af_cur">
+        <option value="KRW">KRW ₩</option>
+        <option value="USD">USD $</option>
+        <option value="JPY">JPY ¥</option>
       </select></label>
       <label style="flex:1;min-width:140px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="af_reason" placeholder="매수 사유" style="width:100%">
@@ -315,9 +315,6 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
         <input id="sf_name" placeholder="" style="width:130px" oninput="searchSell(this.value)" autocomplete="off">
         <div class="suggest-box" id="sf_suggestions"></div>
       </label>
-      <label>보유수량<input id="sf_held" style="width:80px;background:var(--color-section-bg);" readonly></label>
-      <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
-      <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
       <label>구분<select id="sf_cat">
         <option value="">-- 선택 --</option>
         <option value="stock_kr">국내주식</option>
@@ -337,6 +334,9 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
         <option value="유망주">유망주</option>
         <option value="원자재">원자재</option>
       </select></label>
+      <label>보유수량<input id="sf_held" style="width:80px;background:var(--color-section-bg);" readonly></label>
+      <label>매도수량<input id="sf_qty" type="number" placeholder="" style="width:80px"></label>
+      <label>매도단가<input id="sf_price" type="number" placeholder="" style="width:100px"></label>
       <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="sf_reason" placeholder="매도 사유" style="width:100%">
       </label>
@@ -471,10 +471,10 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   </div>
   <div id="soldTotal" style="display:none;padding:8px 0 4px;font-size:13px;color:var(--color-secondary);"></div>
   <div class="add-form" style="padding-top:14px;">
+    <label>날짜<input id="tl_date" type="date" style="width:130px"></label>
     <label>종목명
       <input id="tl_name" placeholder="" style="width:130px" autocomplete="off">
     </label>
-    <label>날짜<input id="tl_date" type="date" style="width:130px"></label>
     <label>유형<select id="tl_type">
       <option value="buy">매수</option>
       <option value="sell">매도</option>
@@ -500,10 +500,12 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     </select></label>
     <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:100px"></label>
     <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:80px"></label>
-    <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
-      <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
-    </label>
-    <button class="btn btn-primary" onclick="addTradeLog_manual()">기록 추가</button>
+    <div style="flex:1 1 100%;display:flex;gap:10px;align-items:flex-end;">
+      <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
+        <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
+      </label>
+      <button class="btn btn-primary" onclick="addTradeLog_manual()">기록 추가</button>
+    </div>
   </div>
   <div id="tradeLogStatus" style="font-size:12px;color:var(--color-secondary);min-height:16px;padding:4px 0;"></div>
   <div class="tbl-wrap">
@@ -1857,6 +1859,9 @@ function executeTrade(){
   if(mode==='form_sell'){
     const {assetId, sellQty, sellPrice, attr, scat} = trade;
     const a = assets.find(x=>x.id===assetId); if(!a) return;
+    // 매도 폼에서 지정한 구분/속성을 먼저 반영 (매매이력에도 기록되도록)
+    if(scat) a.category = scat;
+    if(attr) a.attribute = attr;
     const pnl = Math.round((sellPrice - a.avgPrice) * sellQty);
     const sym = CUR_SYM[a.currency];
     saveSnap(true); // 매도 직전 스냅샷 먼저 (종목 제거 전)
@@ -1867,8 +1872,6 @@ function executeTrade(){
       if(st){ st.innerHTML=`✅ ${a.name} 전량 매도 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.innerHTML='';},3000); }
     } else {
       a.quantity -= sellQty;
-      if(scat) a.category = scat;  // 잔여 종목 구분 갱신
-      if(attr) a.attribute = attr; // 잔여 종목 속성 갱신
       if(st){ st.innerHTML=`✅ ${a.name} ${sellQty.toLocaleString()}주 매도 · 잔여 ${a.quantity.toLocaleString()}주 · 실현손익 <b style="color:${pnl>=0?'var(--color-up)':'var(--color-down)'}">${pnl>=0?'+':''}${sym}${Math.abs(pnl).toLocaleString()}</b>`; setTimeout(()=>{st.innerHTML='';},3000); }
     }
     resetSellForm();
