@@ -2683,6 +2683,23 @@ function getBaseEvKRW1D(a){
 }
 // buildChartHistory 호출 시마다 캐시 초기화
 function clearBaseCache(){ _baseCache = null; _base1DSnap = null; }
+// 종목의 기간 기준단가(KRW) 계산 — 그래프/통계바/합계 공통 사용
+// prices: 해당 종목의 시점별 KRW 단가 배열, fi: 첫 유효 인덱스
+function calcBaseUnit(a, prices, fi){
+  const fx = a.currency==='USD'?FX.USD : a.currency==='JPY'?FX.JPY : 1;
+  if(currentPeriod === '1D'){
+    if(isMarketPreOpen(a)){
+      const lastP = prices[prices.length-1] ?? (a.currentPrice*fx);
+      return lastP; // 개장 전 → 0%
+    }
+    const prevValid = a.prevPrice && a.prevPrice>0 && a.prevPrice !== a.currentPrice;
+    if(prevValid) return a.prevPrice * fx;
+    if(fi === 0 && prices[0]) return prices[0];
+    return (a.currentPrice||a.avgPrice||1) * fx;
+  }
+  return fi === 0 ? (prices[0] || 1) : (a.avgPrice || prices[fi] || 1);
+}
+
 
 // 해당 종목의 장이 "오늘 아직 거래 전"인지 (1D 변화를 0%로 처리할지)
 // - 주말(토·일): 모든 종목 휴장 → 0%
@@ -2882,29 +2899,7 @@ function drawLineChart(){
     // 기준단가 결정:
     // 1D 기간: ① 유효한 전일종가(prevPrice) → ② 스냅샷 기준점 단가 → ③ 현재가 순 폴백
     // 그 외 기간: fi=0이면 기준점 단가, fi>0이면 avgPrice
-    let fvPrice;
-    if(currentPeriod === '1D'){
-      const fx = a.currency==='USD'?FX.USD : a.currency==='JPY'?FX.JPY : 1;
-      if(isMarketPreOpen(a)){
-        // 한국/일본장 개장 전 → 어제 종가 그대로 → 변화 0%
-        const lastP = prices[prices.length-1] ?? (a.currentPrice*fx);
-        fvPrice = lastP;  // 기준가 = 현재단가 → pct 0%
-      } else {
-        // prevPrice가 유효한가? (0 아님 & 현재가와 다름)
-        const prevValid = a.prevPrice && a.prevPrice>0 && a.prevPrice !== a.currentPrice;
-        if(prevValid){
-          fvPrice = a.prevPrice * fx;           // ① 전일종가(KRW 단가)
-        } else if(fi === 0 && prices[0]){
-          fvPrice = prices[0];                  // ② 스냅샷 기준점 단가
-        } else {
-          fvPrice = (a.currentPrice||a.avgPrice||1) * fx; // ③ 현재가(변화 0%)
-        }
-      }
-    } else {
-      fvPrice = fi === 0
-        ? (prices[0] || 1)
-        : (a.avgPrice || prices[fi] || 1);
-    }
+    const fvPrice = calcBaseUnit(a, prices, fi);
 
     const pct = prices.map((p,idx)=>{
       if(idx < fi || p == null) return null;
@@ -2953,7 +2948,7 @@ function drawLineChart(){
       return acc / wsum;               // 가중평균 (정규화)
     });
     const rawSum = chartHistory.map(h=>Object.values(h.byAsset).reduce((s,v)=>s+(v||0),0));
-    lines.unshift({label:'합계', vals:sumVals, absVals:rawSum,
+    lines.unshift({label:currentPeriod+' 합계', vals:sumVals, absVals:rawSum,
       color:'#2c2c2e', lw:1.8, isSum:true, events:[]});
   }
   if(!lines.length) return;
@@ -3250,7 +3245,7 @@ function renderStatBar(){
           const q=(h.byQty&&h.byQty[x.id])?h.byQty[x.id]:cq;
           return ev/q;
         });
-        const fvp = fiX===0 ? (pr[0]||1) : (x.avgPrice||pr[fiX]||1);
+        const fvp = calcBaseUnit(x, pr, fiX);
         pctMap[x.id] = pr.map((p,idx)=> (idx<fiX||p==null)?null:((p-fvp)/fvp)*100);
       });
       const wAssets = sumAssets.filter(x=>pctMap[x.id]);
@@ -3280,13 +3275,13 @@ function renderStatBar(){
           const q=(h.byQty&&h.byQty[x.id])?h.byQty[x.id]:cq;
           return ev/q;
         });
-        const fvp = fiX===0 ? (pr[0]||1) : (x.avgPrice||pr[fiX]||1);
+        const fvp = calcBaseUnit(x, pr, fiX);
         const lastP = pr[pr.length-1] ?? pr.filter(v=>v!=null).slice(-1)[0];
         if(lastP!=null) diff += (lastP - fvp) * cq;
       });
       diff = Math.round(diff);
       return '<div class="stat-item">'+
-        '<div class="stat-lbl" style="color:#555;font-weight:700;">합계</div>'+
+        '<div class="stat-lbl" style="color:#555;font-weight:700;">'+currentPeriod+' 합계</div>'+
         '<div class="stat-val '+updn(pct)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+fmtPct(pct)+')</div>'+
         '<div class="stat-sub">고: '+fmtPct(hiPct)+' · 저: '+fmtPct(loPct)+'</div>'+
       '</div>';
@@ -3316,27 +3311,7 @@ function renderStatBar(){
     });
     // fi=0: 기준점 단가 / fi>0: avgPrice (매수가 기준)
     // 1D는 그래프와 동일하게 prevPrice 우선 폴백
-    let fvPrice2;
-    if(currentPeriod === '1D'){
-      const fx2 = a.currency==='USD'?FX.USD : a.currency==='JPY'?FX.JPY : 1;
-      if(isMarketPreOpen(a)){
-        const lastP2 = pricesS[pricesS.length-1] ?? (a.currentPrice*fx2);
-        fvPrice2 = lastP2;  // 개장 전 → 0%
-      } else {
-        const prevValid2 = a.prevPrice && a.prevPrice>0 && a.prevPrice !== a.currentPrice;
-        if(prevValid2){
-          fvPrice2 = a.prevPrice * fx2;
-        } else if(fi === 0 && pricesS[0]){
-          fvPrice2 = pricesS[0];
-        } else {
-          fvPrice2 = (a.currentPrice||a.avgPrice||1) * fx2;
-        }
-      }
-    } else {
-      fvPrice2 = fi === 0
-        ? (pricesS[0] || 1)
-        : (a.avgPrice || pricesS[fi] || 1);
-    }
+    const fvPrice2 = calcBaseUnit(a, pricesS, fi);
 
     const pctVals = pricesS.map((p,idx)=>{
       if(idx<fi||p==null) return null;
