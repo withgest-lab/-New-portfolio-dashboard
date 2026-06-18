@@ -2335,27 +2335,27 @@ function addCash(){
    요약 카드
 ════════════════════════════════════════ */
 function renderSummary(){
-  // 어제 기준가 캐시 설정: 마지막 스냅샷
-  const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
-  _baseCache = snaps.length>0 ? snaps[snaps.length-1] : null;
+  // 오늘 손익 기준: 1D 그래프와 동일한 "1D 시작 직전 스냅샷"
+  setBase1DSnap();
+  const lastSnap = _base1DSnap;
 
   const ev   = totalEv();
   const cost = assets.reduce((s,a)=>s+costKRW(a), 0);
   const pnl  = ev - cost;
   const rtn  = cost > 0 ? (pnl/cost)*100 : 0;
 
-  // 오늘 손익 계산: 현재 보유 중인 자산만 기준
+  // 오늘 손익 계산: 현재 보유 중인 자산만 기준 (현금 제외)
   const currentAssets = assets.filter(a => a.category !== 'cash');
-  const lastSnap = _baseCache;
-  
+
   // 현재 보유 자산의 현재 평가액 합계
   const currentTotal = currentAssets.reduce((s,a)=>s+evKRW(a), 0) || 1;
   
-  // 현재 보유 자산의 어제 평가액 합계 (마지막 스냅샷 기준)
+  // 현재 보유 자산의 어제 평가액 합계 (1D 기준 스냅샷, 현재수량 환산)
   const yesterdayTotal = currentAssets.reduce((s,a)=>{
-    if(lastSnap && lastSnap.byAsset && lastSnap.byQty && lastSnap.byAsset[a.id]){
-      // 어제 기록이 있으면 그 값 사용
-      return s + (lastSnap.byAsset[a.id]||0);
+    if(lastSnap && lastSnap.byAsset && lastSnap.byAsset[a.id]!=null){
+      const q = (lastSnap.byQty && lastSnap.byQty[a.id]) ? lastSnap.byQty[a.id] : (a.quantity||1);
+      const unit = lastSnap.byAsset[a.id] / (q||1);  // 당시 단가(KRW)
+      return s + unit * (a.quantity||1);             // 현재 수량 환산
     } else {
       // 어제 기록이 없으면 (신규 종목) 현재가 기준
       return s + evKRW(a);
@@ -2624,39 +2624,51 @@ function getPeriodStart(period){
 //   2. 스냅샷에 없는 종목 → avgPrice
 //   3. 스냅샷 자체가 없으면 → prevPrice≠currentPrice면 prevPrice, 아니면 avgPrice
 let _baseCache = null;
+let _base1DSnap = null; // 1D 시작 직전 스냅샷 (기준가용)
 function _getExistingIds(){
-  if(_baseCache) return _baseCache;
   const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
-  // 가장 오래된 스냅샷의 종목들이 기존 종목
   const oldest = snaps[0];
-  _baseCache = oldest ? new Set(Object.keys(oldest.byAsset||{})) : null;
-  return _baseCache;
+  return oldest ? new Set(Object.keys(oldest.byAsset||{})) : null;
+}
+// 1D 기준 스냅샷 설정: 1D 시작 시각(어제 미국장) 직전의 마지막 스냅샷
+function setBase1DSnap(){
+  const startTs = getPeriodStart('1D').getTime();
+  const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+  // startTs 이전(또는 같은) 스냅샷 중 가장 최근 것
+  const before = snaps.filter(s=>s.timestamp<=startTs);
+  _base1DSnap = before.length ? before[before.length-1] : (snaps[0]||null);
 }
 function getBasePrice(a){
-  // 캐시된 lastSnap이 있으면 거기서 가져오기
-  if(_baseCache && _baseCache.lastSnap){
-    const lastByAsset = _baseCache.lastSnap.byAsset || {};
-    const lastQty = _baseCache.lastSnap.byQty || {};
-    const id = a.id;
-    // 마지막 스냅샷에 이 자산이 있었으면 당시 평단가 복원
-    if(lastByAsset[id] && lastQty[id]){
-      return Math.round(lastByAsset[id] / (lastQty[id]||1));
+  // 1D 기준 스냅샷에서 당시 단가 복원
+  if(_base1DSnap && _base1DSnap.byAsset){
+    const ev = _base1DSnap.byAsset[a.id];
+    const q  = (_base1DSnap.byQty && _base1DSnap.byQty[a.id]) ? _base1DSnap.byQty[a.id] : (a.quantity||1);
+    if(ev!=null && q>0){
+      return ev / q; // KRW 환산 단가 → getBaseEvKRW1D에서 다시 환산하지 않도록 주의
     }
   }
-  // 캐시 없으면: prevPrice(전일가) 사용, 없으면 현재가
+  // 폴백: prevPrice(전일가), 없으면 현재가
   if(a.prevPrice && a.prevPrice !== a.currentPrice) return a.prevPrice;
-  if(a.category === 'cash') return a.currentPrice;
   return a.currentPrice;
 }
 function getBaseEvKRW1D(a){
   const qty = a.quantity || 1;
-  const bp  = getBasePrice(a);
+  // 1D 기준 스냅샷이 있으면 그 KRW 평가금액을 현재수량 비율로 환산
+  if(_base1DSnap && _base1DSnap.byAsset){
+    const ev = _base1DSnap.byAsset[a.id];
+    const q  = (_base1DSnap.byQty && _base1DSnap.byQty[a.id]) ? _base1DSnap.byQty[a.id] : qty;
+    if(ev!=null && q>0){
+      return (ev / q) * qty; // 당시 단가(KRW) × 현재 수량
+    }
+  }
+  // 폴백: prevPrice 기반 (원통화 → KRW 환산)
+  const bp = a.prevPrice && a.prevPrice!==a.currentPrice ? a.prevPrice : a.currentPrice;
   if(a.currency === 'USD') return bp * FX.USD * qty;
   if(a.currency === 'JPY') return bp * FX.JPY * qty;
   return bp * qty;
 }
 // buildChartHistory 호출 시마다 캐시 초기화
-function clearBaseCache(){ _baseCache = null; }
+function clearBaseCache(){ _baseCache = null; _base1DSnap = null; }
 
 function buildSnapshotHistory(period){
   const startTs = getPeriodStart(period).getTime();
@@ -2699,6 +2711,7 @@ function buildSnapshotHistory(period){
 
   if(period === '1D'){
     // ── 1D: 현재 보유 자산(현금 제외)만 기준 ──
+    setBase1DSnap(); // 1D 시작 직전 스냅샷을 기준가로 설정
     const _existIds1D = _getExistingIds();
     
     const base1D = {}, qty1D = {};
