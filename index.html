@@ -233,6 +233,66 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
   <div class="stat-bar" id="statBar"></div>
 </div>
 
+<!-- 7. 매매 이력 -->
+<div class="card">
+  <div class="snap-header">
+    <div class="section-label" style="margin:0">매매 이력</div>
+    <button class="btn btn-ghost" onclick="clearTradeLog()">이력 초기화</button>
+  </div>
+  <div id="soldTotal" style="display:none;padding:8px 0 4px;font-size:13px;color:var(--color-secondary);"></div>
+  <div class="tbl-wrap">
+    <table class="table-auto">
+      <thead><tr>
+        <th style="text-align:left">날짜</th>
+        <th style="text-align:left">종목</th>
+        <th>유형<br><span style="font-weight:400;text-transform:none;">구분·속성</span></th>
+        <th>체결단가 × 수량<br><span style="font-weight:400;text-transform:none;">총금액</span></th>
+        <th>실현손익</th>
+        <th>관리</th>
+      </tr></thead>
+      <tbody id="soldTbody"></tbody>
+    </table>
+  </div>
+  <div class="add-form" style="padding-top:14px;margin-top:14px;border-top:1px solid var(--color-section-bg);">
+    <label>날짜<input id="tl_date" type="date" style="width:120px"></label>
+    <label>종목명
+      <input id="tl_name" placeholder="" style="width:110px" autocomplete="off">
+    </label>
+    <label>유형<select id="tl_type" style="width:70px">
+      <option value="buy">매수</option>
+      <option value="sell">매도</option>
+    </select></label>
+    <label>구분<select id="tl_cat" style="width:90px">
+      <option value="">-- 선택 --</option>
+      <option value="stock_kr">국내주식</option>
+      <option value="stock_us">미국주식</option>
+      <option value="stock_jp">일본주식</option>
+      <option value="pension_personal">개인연금</option>
+      <option value="pension_retirement">퇴직연금</option>
+      <option value="irp">IRP 개인</option>
+      <option value="isa">ISA</option>
+      <option value="crypto">가상자산</option>
+      <option value="cash">현금</option>
+    </select></label>
+    <label>속성<select id="tl_attr" style="width:80px">
+      <option value="">— 없음 —</option>
+      <option value="Core">Core</option>
+      <option value="주도주">주도주</option>
+      <option value="유망주">유망주</option>
+      <option value="원자재">원자재</option>
+    </select></label>
+    <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:85px"></label>
+    <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:70px"></label>
+    <div style="flex:1 1 100%;display:flex;gap:10px;align-items:flex-end;">
+      <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
+        <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
+      </label>
+      <button class="btn btn-primary" onclick="addTradeLog_manual()">기록 추가</button>
+    </div>
+  </div>
+  <div id="tradeLogStatus" style="font-size:12px;color:var(--color-secondary);min-height:16px;padding:4px 0;"></div>
+</div>
+
 <!-- 1-1. 자산 현황 요약 (그래프 바로 아래) -->
 <div class="summary-grid" id="summaryGrid"></div>
 
@@ -450,75 +510,15 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     <div class="section-label" style="margin:0">스냅샷 이력</div>
     <button class="btn btn-ghost" onclick="clearSnaps()">이력 초기화</button>
   </div>
-  <div class="tbl-wrap">
+  <div class="tbl-wrap" style="max-height:280px;overflow-y:auto;">
     <table class="table-auto">
-      <thead><tr>
+      <thead style="position:sticky;top:0;z-index:4;"><tr>
         <th style="text-align:left">저장 시각</th>
         <th>총 평가금액</th>
         <th class="col-hide">전 스냅샷 대비</th>
         <th>변화율</th><th>삭제</th>
       </tr></thead>
       <tbody id="snapTbody"></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- 7. 매매 이력 -->
-<div class="card">
-  <div class="snap-header">
-    <div class="section-label" style="margin:0">매매 이력</div>
-    <button class="btn btn-ghost" onclick="clearTradeLog()">이력 초기화</button>
-  </div>
-  <div id="soldTotal" style="display:none;padding:8px 0 4px;font-size:13px;color:var(--color-secondary);"></div>
-  <div class="add-form" style="padding-top:14px;">
-    <label>날짜<input id="tl_date" type="date" style="width:120px"></label>
-    <label>종목명
-      <input id="tl_name" placeholder="" style="width:110px" autocomplete="off">
-    </label>
-    <label>유형<select id="tl_type" style="width:70px">
-      <option value="buy">매수</option>
-      <option value="sell">매도</option>
-    </select></label>
-    <label>구분<select id="tl_cat" style="width:90px">
-      <option value="">-- 선택 --</option>
-      <option value="stock_kr">국내주식</option>
-      <option value="stock_us">미국주식</option>
-      <option value="stock_jp">일본주식</option>
-      <option value="pension_personal">개인연금</option>
-      <option value="pension_retirement">퇴직연금</option>
-      <option value="irp">IRP 개인</option>
-      <option value="isa">ISA</option>
-      <option value="crypto">가상자산</option>
-      <option value="cash">현금</option>
-    </select></label>
-    <label>속성<select id="tl_attr" style="width:80px">
-      <option value="">— 없음 —</option>
-      <option value="Core">Core</option>
-      <option value="주도주">주도주</option>
-      <option value="유망주">유망주</option>
-      <option value="원자재">원자재</option>
-    </select></label>
-    <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:85px"></label>
-    <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:70px"></label>
-    <div style="flex:1 1 100%;display:flex;gap:10px;align-items:flex-end;">
-      <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
-        <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
-      </label>
-      <button class="btn btn-primary" onclick="addTradeLog_manual()">기록 추가</button>
-    </div>
-  </div>
-  <div id="tradeLogStatus" style="font-size:12px;color:var(--color-secondary);min-height:16px;padding:4px 0;"></div>
-  <div class="tbl-wrap">
-    <table class="table-auto">
-      <thead><tr>
-        <th style="text-align:left">날짜</th>
-        <th style="text-align:left">종목</th>
-        <th>유형<br><span style="font-weight:400;text-transform:none;">구분·속성</span></th>
-        <th>체결단가 × 수량<br><span style="font-weight:400;text-transform:none;">총금액</span></th>
-        <th>실현손익</th>
-        <th>관리</th>
-      </tr></thead>
-      <tbody id="soldTbody"></tbody>
     </table>
   </div>
 </div>
@@ -1423,6 +1423,23 @@ function renderSnaps(){
       <td><button class="del-btn" onclick="deleteSnap('${s.id||s.timestamp}')">🗑</button></td>
     </tr>`;
   }).join('');
+
+  // 최근 2일 분량의 행 개수만큼 보이도록 스크롤 영역 높이 동적 조정
+  const twoDaysAgo = Date.now() - 2*24*60*60*1000;
+  const recentCount = snaps.filter(s=>s.timestamp >= twoDaysAgo).length;
+  const wrap = tb.closest('.tbl-wrap');
+  if(wrap){
+    requestAnimationFrame(()=>{
+      const headerH = wrap.querySelector('thead')?.offsetHeight || 32;
+      const rows = tb.querySelectorAll('tr');
+      let rowsH = 0;
+      for(let i=0;i<Math.min(recentCount||1, rows.length);i++){
+        rowsH += rows[i].offsetHeight;
+      }
+      const target = headerH + rowsH + 4;
+      wrap.style.maxHeight = Math.max(target, headerH+40) + 'px';
+    });
+  }
 }
 
 /* ════════════════════════════════════════
