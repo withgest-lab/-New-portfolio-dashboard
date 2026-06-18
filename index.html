@@ -2634,9 +2634,16 @@ function _getExistingIds(){
 function setBase1DSnap(){
   const startTs = getPeriodStart('1D').getTime();
   const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
+  if(!snaps.length){ _base1DSnap = null; return; }
   // startTs 이전(또는 같은) 스냅샷 중 가장 최근 것
   const before = snaps.filter(s=>s.timestamp<=startTs);
-  _base1DSnap = before.length ? before[before.length-1] : (snaps[0]||null);
+  if(before.length){
+    _base1DSnap = before[before.length-1];
+  } else {
+    // 이전 스냅샷이 없으면(기간 시작 전 데이터 없음) → 기간 내 첫 스냅샷을 기준으로
+    // (옛날 스냅샷을 쓰면 수익률이 과대 계산됨)
+    _base1DSnap = snaps[0];
+  }
 }
 function getBasePrice(a){
   // 1D 기준 스냅샷에서 당시 단가 복원
@@ -2713,22 +2720,28 @@ function buildSnapshotHistory(period){
     // ── 1D: 현재 보유 자산(현금 제외)만 기준 ──
     setBase1DSnap(); // 1D 시작 직전 스냅샷을 기준가로 설정
     const _existIds1D = _getExistingIds();
-    
+
     const base1D = {}, qty1D = {};
     currentAssets.forEach(a=>{
       // 신규 종목이면 가상 기준점에서 제외
       if(_existIds1D && !_existIds1D.has(a.id)) return;
-      base1D[a.id] = Math.round(getBaseEvKRW1D(a));
-      qty1D[a.id]  = a.quantity || 1;
+      // 기준점 단가: _base1DSnap에 있으면 그 당시 단가 그대로, 없으면 폴백
+      if(_base1DSnap && _base1DSnap.byAsset && _base1DSnap.byAsset[a.id]!=null){
+        const bq = (_base1DSnap.byQty && _base1DSnap.byQty[a.id]) ? _base1DSnap.byQty[a.id] : (a.quantity||1);
+        base1D[a.id] = _base1DSnap.byAsset[a.id];   // 당시 KRW 평가금액
+        qty1D[a.id]  = bq;                          // 당시 수량 → 단가 = 평가/수량 일치
+      } else {
+        base1D[a.id] = Math.round(getBaseEvKRW1D(a));
+        qty1D[a.id]  = a.quantity || 1;
+      }
     });
-    
+
     history.push({ts: startTs, byAsset: base1D, byQty: qty1D,
                   total: Object.values(base1D).reduce((s,v)=>s+v,0)});
 
     // 기간 내 스냅샷 추가 - 현금 제외 합계로 재계산
     periodSnaps.forEach(s=>{
       const p = snapToPoint(s);
-      // 현재 보유 자산만 기준으로 total 재계산
       const snapshotTotal = Object.values(p.byAsset).reduce((s,v)=>s+v, 0) || 1;
       history.push({ts: s.timestamp, byAsset: p.byAsset, byQty: p.byQty, total: snapshotTotal});
     });
@@ -2843,11 +2856,25 @@ function drawLineChart(){
     });
 
     // 기준단가 결정:
-    // fi=0: 기준점 스냅샷에 있는 기존 종목 → 기준점 단가(prevPrice or 스냅샷 단가)
-    // fi>0: 기준점에 없는 신규 종목 → avgPrice 기준 (매수가 = 0%)
-    const fvPrice = fi === 0
-      ? (prices[0] || 1)
-      : (a.avgPrice || prices[fi] || 1);
+    // 1D 기간: ① 유효한 전일종가(prevPrice) → ② 스냅샷 기준점 단가 → ③ 현재가 순 폴백
+    // 그 외 기간: fi=0이면 기준점 단가, fi>0이면 avgPrice
+    let fvPrice;
+    if(currentPeriod === '1D'){
+      const fx = a.currency==='USD'?FX.USD : a.currency==='JPY'?FX.JPY : 1;
+      // prevPrice가 유효한가? (0 아님 & 현재가와 다름 = 실제 전일종가가 들어옴)
+      const prevValid = a.prevPrice && a.prevPrice>0 && a.prevPrice !== a.currentPrice;
+      if(prevValid){
+        fvPrice = a.prevPrice * fx;           // ① 전일종가(KRW 단가)
+      } else if(fi === 0 && prices[0]){
+        fvPrice = prices[0];                  // ② 스냅샷 기준점 단가
+      } else {
+        fvPrice = (a.currentPrice||a.avgPrice||1) * fx; // ③ 현재가(변화 0% 처리)
+      }
+    } else {
+      fvPrice = fi === 0
+        ? (prices[0] || 1)
+        : (a.avgPrice || prices[fi] || 1);
+    }
 
     const pct = prices.map((p,idx)=>{
       if(idx < fi || p == null) return null;
@@ -3258,9 +3285,23 @@ function renderStatBar(){
       return ev / q;
     });
     // fi=0: 기준점 단가 / fi>0: avgPrice (매수가 기준)
-    const fvPrice2 = fi === 0
-      ? (pricesS[0] || 1)
-      : (a.avgPrice || pricesS[fi] || 1);
+    // 1D는 그래프와 동일하게 prevPrice 우선 폴백
+    let fvPrice2;
+    if(currentPeriod === '1D'){
+      const fx2 = a.currency==='USD'?FX.USD : a.currency==='JPY'?FX.JPY : 1;
+      const prevValid2 = a.prevPrice && a.prevPrice>0 && a.prevPrice !== a.currentPrice;
+      if(prevValid2){
+        fvPrice2 = a.prevPrice * fx2;
+      } else if(fi === 0 && pricesS[0]){
+        fvPrice2 = pricesS[0];
+      } else {
+        fvPrice2 = (a.currentPrice||a.avgPrice||1) * fx2;
+      }
+    } else {
+      fvPrice2 = fi === 0
+        ? (pricesS[0] || 1)
+        : (a.avgPrice || pricesS[fi] || 1);
+    }
 
     const pctVals = pricesS.map((p,idx)=>{
       if(idx<fi||p==null) return null;
