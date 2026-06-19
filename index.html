@@ -510,9 +510,9 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     <div class="section-label" style="margin:0">스냅샷 이력</div>
     <button class="btn btn-ghost" onclick="clearSnaps()">이력 초기화</button>
   </div>
-  <div class="tbl-wrap" style="max-height:280px;overflow-y:auto;">
-    <table class="table-auto">
-      <thead style="position:sticky;top:0;z-index:4;"><tr>
+  <div class="tbl-wrap" id="snapWrap">
+    <table class="table-auto" id="snapTable">
+      <thead><tr>
         <th style="text-align:left">저장 시각</th>
         <th>총 평가금액</th>
         <th class="col-hide">전 스냅샷 대비</th>
@@ -1407,15 +1407,19 @@ function clearSnaps(){
 function renderSnaps(){
   const snaps=loadSnaps().slice().sort((a,b)=>b.timestamp-a.timestamp);
   const tb=document.getElementById('snapTbody');
+  const wrap=document.getElementById('snapWrap');
   if(!snaps.length){
     tb.innerHTML='<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--color-tertiary)">저장된 스냅샷이 없습니다</td></tr>';
+    if(wrap){ wrap.style.maxHeight=''; wrap.style.overflowY=''; }
     return;
   }
+  const twoDaysAgo = Date.now() - 2*24*60*60*1000;
   tb.innerHTML=snaps.map((s,i)=>{
     const prev=snaps[i+1];
     const diff=prev?s.totalValue-prev.totalValue:null;
     const pct=prev&&prev.totalValue>0?(diff/prev.totalValue)*100:null;
-    return`<tr>
+    const isRecent = s.timestamp >= twoDaysAgo;
+    return`<tr data-recent="${isRecent}">
       <td style="text-align:left">${new Date(s.timestamp).toLocaleString('ko-KR')}${s.manual?'<span style="font-size:9px;color:#007aff;margin-left:4px;">수동</span>':''}</td>
       <td>${fmt(s.totalValue)}</td>
       <td class="col-hide ${diff===null?'':(diff>=0?'up':'dn')}">${diff===null?'—':(diff>=0?'+':'')+fmt(diff)}</td>
@@ -1424,20 +1428,18 @@ function renderSnaps(){
     </tr>`;
   }).join('');
 
-  // 최근 2일 분량의 행 개수만큼 보이도록 스크롤 영역 높이 동적 조정
-  const twoDaysAgo = Date.now() - 2*24*60*60*1000;
-  const recentCount = snaps.filter(s=>s.timestamp >= twoDaysAgo).length;
-  const wrap = tb.closest('.tbl-wrap');
   if(wrap){
     requestAnimationFrame(()=>{
-      const headerH = wrap.querySelector('thead')?.offsetHeight || 32;
-      const rows = tb.querySelectorAll('tr');
+      const table = document.getElementById('snapTable');
+      const theadH = table?.querySelector('thead')?.getBoundingClientRect().height || 36;
+      const recentRows = tb.querySelectorAll('tr[data-recent="true"]');
       let rowsH = 0;
-      for(let i=0;i<Math.min(recentCount||1, rows.length);i++){
-        rowsH += rows[i].offsetHeight;
-      }
-      const target = headerH + rowsH + 4;
-      wrap.style.maxHeight = Math.max(target, headerH+40) + 'px';
+      recentRows.forEach(r=>{ rowsH += r.getBoundingClientRect().height; });
+      if(rowsH === 0) rowsH = 36 * 3;
+      wrap.style.maxHeight = (theadH + rowsH + 8) + 'px';
+      wrap.style.overflowY = 'auto';
+      wrap.style.overflowX = 'auto';
+      wrap.style.webkitOverflowScrolling = 'touch';
     });
   }
 }
@@ -2904,11 +2906,12 @@ function drawLineChart(){
     if(fi===-1) return;
 
     // 단가 기준 pct 계산 (수량 변화 무관):
-    // 각 스냅샷의 단가 = 평가금액 / byQty (당시 수량)
     const curQty = a.quantity || 1;
-    const prices = chartHistory.map(h=>{
+    const prices = chartHistory.map((h,idx)=>{
       const ev = h.byAsset[a.id];
       if(ev == null) return null;
+      // 1D: 정규장 시간대가 아니면 null (KRW/JPY=09:00~15:30, USD=22:30~05:00)
+      if(currentPeriod === '1D' && !isInRegularSession(h.ts, a.currency)) return null;
       const q = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : curQty;
       return ev / q;
     });
@@ -2938,8 +2941,10 @@ function drawLineChart(){
     // 화면 라인은 선택된 자산만 추가
     if(selectedAssets.has(a.id)){
       const col = LINE_COLS[i%LINE_COLS.length];
+      // 1D: 마지막 정규장 유효값 인덱스 (장외 null 구간 이후 점 표시용)
+      const lastValidIdx = pct.reduce((acc,v,i)=>v!=null?i:acc, -1);
       lines.push({label:a.name, vals:pct, absVals:raw,
-        color:col, lw:1.2, assetId:a.id, events});
+        color:col, lw:1.2, assetId:a.id, events, lastValidIdx});
     }
   });
 
@@ -3139,10 +3144,16 @@ function drawLineChart(){
     ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath();
     let started=false;
+    let prevNull=false;
     line.vals.forEach((v,i)=>{
-      if(v==null) return;
-      if(!started){ctx.moveTo(toX(i),useY(v));started=true;}
-      else ctx.lineTo(toX(i),useY(v));
+      if(v==null){ prevNull=true; return; }
+      if(!started || prevNull){
+        ctx.moveTo(toX(i),useY(v));
+        started=true;
+      } else {
+        ctx.lineTo(toX(i),useY(v));
+      }
+      prevNull=false;
     });
     ctx.stroke(); ctx.setLineDash([]);
 
@@ -3480,13 +3491,30 @@ function restoreFromFile(event){
 function isUSDST(){
   const now=new Date();
   const y=now.getFullYear();
-  // 3월 둘째 일요일
   const mar=new Date(y,2,1);
   const dstStart=new Date(y,2,14-((mar.getDay()||7)-1));
-  // 11월 첫째 일요일
   const nov=new Date(y,10,1);
   const dstEnd=new Date(y,10,7-((nov.getDay()||7)-1));
   return now>=dstStart && now<dstEnd;
+}
+
+// 특정 타임스탬프가 해당 종목의 정규장 시간대인지 판단 (1D 그래프용)
+// KRW/JPY: 09:00~15:30 (한국/일본 정규장)
+// USD: 서머타임 22:30~05:00 / 비서머타임 23:30~06:00
+function isInRegularSession(ts, currency){
+  const d = new Date(ts);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const hm = h * 60 + m; // 분 단위 시각
+  if(currency === 'USD'){
+    const dst = isUSDST();
+    const open = dst ? (22*60+30) : (23*60+30); // 22:30 or 23:30
+    const close = dst ? (5*60)    : (6*60);      // 05:00 or 06:00
+    // 자정 걸치므로: open~자정 OR 자정~close
+    return hm >= open || hm < close;
+  }
+  // KRW / JPY: 09:00 ~ 15:30
+  return hm >= 9*60 && hm <= 15*60+30;
 }
 
 // ── 자동 스냅샷 시간 (서머타임 반영, 한국 시간 기준) ──
