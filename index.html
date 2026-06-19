@@ -795,7 +795,12 @@ async function fetchYahoo(ticker){
     if(!meta?.regularMarketPrice) throw new Error('no price');
     const regularPrice = meta.regularMarketPrice;
     const prev = meta.chartPreviousClose||meta.previousClose||regularPrice;
-    return {ok:true, price:regularPrice, prev, regularPrice, marketState:'REGULAR'};
+    // 애프터마켓/프리마켓 변화율
+    const postPrice = meta.postMarketPrice || null;
+    const postPct = (postPrice && regularPrice)
+      ? ((postPrice - regularPrice) / regularPrice) * 100
+      : null;
+    return {ok:true, price:regularPrice, prev, regularPrice, marketState:'REGULAR', postMarketPct: postPct};
   };
   try{
     return await Promise.any(
@@ -867,6 +872,12 @@ async function fetchAllPrices(saveSnapshot=false){
           }
           // 정규장 가격만 저장
           if(p.value.r.regularPrice)  a.regularPrice  = p.value.r.regularPrice;
+          // 애프터마켓 변화율 저장 (USD 종목만)
+          if(a.currency === 'USD' && p.value.r.postMarketPct != null){
+            a.postMarketPct = Math.round(p.value.r.postMarketPct * 100) / 100;
+          } else {
+            a.postMarketPct = null;
+          }
           ok++;
         }
       }else{
@@ -1500,9 +1511,13 @@ function renderTable(){
       const regChg = a.prevPrice>0?((regPrice-a.prevPrice)/a.prevPrice)*100:0;
 
       if(isUS){
-        // 미국 주식: 정규장 가격만 표시
+        // 미국 주식: 정규장 가격 + 애프터마켓 변화율 표시
         priceDisplay = priceStr(regPrice);
-        dayChgCell   = `<span class="${updn(regChg)}">${fmtPct(regChg)}</span>`;
+        const afterPct = a.postMarketPct;
+        const afterStr = (afterPct != null)
+          ? `<span style="font-size:9px;color:${afterPct>=0?'var(--color-up)':'var(--color-down)'};margin-left:3px;">(A ${afterPct>=0?'+':''}${afterPct.toFixed(2)}%)</span>`
+          : '';
+        dayChgCell = `<span class="${updn(regChg)}">${fmtPct(regChg)}</span>${afterStr}`;
       } else {
         // 한국/일본: 단순 표시
         priceDisplay = priceStr(regPrice);
@@ -3200,7 +3215,13 @@ function drawLineChart(){
     labeled.forEach(l=>{
       const aly = Math.max(gT+6, Math.min(gT+gH-4, l._aly));
       const pctStr = (l._lp>=0?'+':'') + l._lp.toFixed(2) + '%';
-      const txt = l.label + ' ' + pctStr;
+      // 애프터장 % (USD 종목에 한해)
+      const asset = l.assetId ? assets.find(a=>a.id===l.assetId) : null;
+      const afterPct = asset?.postMarketPct;
+      const afterStr = (afterPct != null)
+        ? ` (A ${afterPct>=0?'+':''}${afterPct.toFixed(2)}%)`
+        : '';
+      const txt = l.label + ' ' + pctStr + afterStr;
       const maxW = RLABEL - 6;
 
       // 연결선 (위치 이동된 경우)
@@ -3216,7 +3237,7 @@ function drawLineChart(){
       } else {
         // 종목명과 % 두 줄로
         ctx.fillText(l.label, LBL_X, aly-2);
-        ctx.fillText(pctStr,  LBL_X, aly+8);
+        ctx.fillText(pctStr + afterStr, LBL_X, aly+8);
       }
     });
   }
