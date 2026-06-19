@@ -510,16 +510,34 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     <div class="section-label" style="margin:0">스냅샷 이력</div>
     <button class="btn btn-ghost" onclick="clearSnaps()">이력 초기화</button>
   </div>
-  <div class="tbl-wrap" id="snapWrap">
-    <table class="table-auto" id="snapTable">
-      <thead><tr>
+  <div class="tbl-wrap" style="overflow-x:auto;">
+    <table class="table-auto" id="snapTable" style="width:100%;table-layout:fixed;">
+      <colgroup>
+        <col style="width:45%">
+        <col style="width:18%">
+        <col class="col-hide" style="width:18%">
+        <col style="width:12%">
+        <col style="width:7%">
+      </colgroup>
+      <thead id="snapThead"><tr>
         <th style="text-align:left">저장 시각</th>
         <th>총 평가금액</th>
         <th class="col-hide">전 스냅샷 대비</th>
         <th>변화율</th><th>삭제</th>
       </tr></thead>
-      <tbody id="snapTbody"></tbody>
     </table>
+    <div id="snapWrap" style="overflow-y:auto;overflow-x:hidden;">
+      <table class="table-auto" style="width:100%;table-layout:fixed;">
+        <colgroup>
+          <col style="width:45%">
+          <col style="width:18%">
+          <col class="col-hide" style="width:18%">
+          <col style="width:12%">
+          <col style="width:7%">
+        </colgroup>
+        <tbody id="snapTbody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -1430,20 +1448,15 @@ function renderSnaps(){
 
   if(wrap){
     requestAnimationFrame(()=>{
-      const table = document.getElementById('snapTable');
-      const theadH = table?.querySelector('thead')?.getBoundingClientRect().height || 36;
       const recentRows = tb.querySelectorAll('tr[data-recent="true"]');
       let rowsH = 0;
       recentRows.forEach(r=>{ rowsH += r.getBoundingClientRect().height; });
       if(rowsH === 0) rowsH = 36 * 3;
-      wrap.style.maxHeight = (theadH + rowsH + 8) + 'px';
+      wrap.style.maxHeight = (rowsH + 8) + 'px';
       wrap.style.overflowY = 'auto';
-      wrap.style.overflowX = 'auto';
-      wrap.style.webkitOverflowScrolling = 'touch';
     });
   }
 }
-
 /* ════════════════════════════════════════
    자산 목록
 ════════════════════════════════════════ */
@@ -2907,11 +2920,9 @@ function drawLineChart(){
 
     // 단가 기준 pct 계산 (수량 변화 무관):
     const curQty = a.quantity || 1;
-    const prices = chartHistory.map((h,idx)=>{
+    const prices = chartHistory.map(h=>{
       const ev = h.byAsset[a.id];
       if(ev == null) return null;
-      // 1D: 정규장 시간대가 아니면 null (KRW/JPY=09:00~15:30, USD=22:30~05:00)
-      if(currentPeriod === '1D' && !isInRegularSession(h.ts, a.currency)) return null;
       const q = (h.byQty && h.byQty[a.id]) ? h.byQty[a.id] : curQty;
       return ev / q;
     });
@@ -3142,69 +3153,17 @@ function drawLineChart(){
     ctx.lineJoin='round'; ctx.lineCap='round';
     const lw = line.isSum?1.8:1.2;
 
-    if(currentPeriod === '1D' && !line.isSum){
-      // 1D: 정규장 = 실선, 장외 = 컬러 점선(투명도 50%)
-      const currency = line.assetId
-        ? (assets.find(a=>a.id===line.assetId)?.currency || 'KRW')
-        : 'KRW';
-
-      // 각 인덱스가 정규장인지 판단
-      const inSession = chartHistory.map(h=>
-        h.byAsset && isInRegularSession(h.ts, currency)
-      );
-
-      // 정규장 실선 구간 그리기
-      ctx.setLineDash([]);
-      ctx.strokeStyle = line.color;
-      ctx.lineWidth = lw;
-      ctx.beginPath();
-      let started1=false, prevNull1=false;
-      line.vals.forEach((v,i)=>{
-        if(v==null||!inSession[i]){ prevNull1=true; return; }
-        if(!started1||prevNull1){ ctx.moveTo(toX(i),useY(v)); started1=true; }
-        else ctx.lineTo(toX(i),useY(v));
-        prevNull1=false;
-      });
-      ctx.stroke();
-
-      // 장외 구간: 마지막 정규장값을 수평으로 유지하며 컬러 점선
-      ctx.setLineDash([4,4]);
-      // 투명도 50%를 위해 색상에 알파 적용
-      const hexColor = line.color;
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = hexColor;
-      ctx.lineWidth = lw * 0.8;
-      ctx.beginPath();
-      let lastVal=null, started2=false;
-      line.vals.forEach((v,i)=>{
-        if(v!=null && inSession[i]){
-          lastVal = v; // 정규장 구간이면 lastVal 갱신
-          return;
-        }
-        // 장외 구간: lastVal(마지막 정규장 종가)로 플랫 라인
-        if(lastVal===null) return;
-        const flatY = useY(lastVal);
-        if(!started2){ ctx.moveTo(toX(i), flatY); started2=true; }
-        else ctx.lineTo(toX(i), flatY);
-      });
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
-      ctx.setLineDash([]);
-
-    } else {
-      // 1D 합계 또는 다른 기간: 기존 방식
-      ctx.setLineDash(line.isSum?[]:[2,1]);
-      ctx.strokeStyle=line.color; ctx.lineWidth=lw;
-      ctx.beginPath();
-      let started=false, prevNull=false;
-      line.vals.forEach((v,i)=>{
-        if(v==null){ prevNull=true; return; }
-        if(!started||prevNull){ ctx.moveTo(toX(i),useY(v)); started=true; }
-        else ctx.lineTo(toX(i),useY(v));
-        prevNull=false;
-      });
-      ctx.stroke(); ctx.setLineDash([]);
-    }
+    ctx.setLineDash(line.isSum?[]:[2,1]);
+    ctx.strokeStyle=line.color; ctx.lineWidth=lw;
+    ctx.beginPath();
+    let started=false, prevNull=false;
+    line.vals.forEach((v,i)=>{
+      if(v==null){ prevNull=true; return; }
+      if(!started||prevNull){ ctx.moveTo(toX(i),useY(v)); started=true; }
+      else ctx.lineTo(toX(i),useY(v));
+      prevNull=false;
+    });
+    ctx.stroke(); ctx.setLineDash([]);
 
     // 끝점 원
     const lvi=[...line.vals].reverse().findIndex(v=>v!=null);
