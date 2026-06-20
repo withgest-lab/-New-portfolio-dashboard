@@ -1297,7 +1297,7 @@ function saveSnap(isManual=false){
 function renderSoldHistory(){
   const el = document.getElementById('soldTbody');
   if(!el) return;
-  const arr = loadTradeLog();
+  const arr = loadTradeLog().slice().sort((a,b)=>b.at-a.at); // 최신순 정렬
   if(!arr.length){
     el.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--color-tertiary);">매매 이력 없음</td></tr>`;
     const total = document.getElementById('soldTotal');
