@@ -1577,8 +1577,8 @@ function renderTable(){
     // 현금 평가금액: KRW는 잔액, USD/JPY는 환율 환산
     const cashEvDisplay = isCash
       ? (a.currency==='KRW'
-          ? `₩${Math.round(a.currentPrice).toLocaleString('ko-KR')}`
-          : `${priceStr(a.currentPrice)}<br><span style="font-size:10px;color:var(--color-tertiary)">₩${Math.round(evKRW(a)).toLocaleString('ko-KR')}</span>`)
+          ? fmt(a.currentPrice)
+          : `${priceStr(a.currentPrice)}<br><span style="font-size:10px;color:var(--color-tertiary)">${fmt(evKRW(a))}</span>`)
       : null;
 
     let rows=`<tr style="cursor:pointer;" ondblclick="toggleQuickTrade('${a.id}')">
