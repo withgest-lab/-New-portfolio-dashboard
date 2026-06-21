@@ -287,12 +287,12 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     </select></label>
     <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:78px"></label>
     <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:62px"></label>
-    <label>통화<select id="tl_cur" style="width:65px">
-      <option value="KRW">KRW</option>
-      <option value="USD">USD</option>
-      <option value="JPY">JPY</option>
-    </select></label>
     <div style="flex:1 1 100%;display:flex;gap:10px;align-items:flex-end;">
+      <label>통화<select id="tl_cur" style="width:65px">
+        <option value="KRW">KRW ₩</option>
+        <option value="USD">USD $</option>
+        <option value="JPY">JPY ¥</option>
+      </select></label>
       <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
       </label>
@@ -1183,46 +1183,27 @@ function addTradeLog_manual(){
 
   const at = dateV ? new Date(dateV+'T00:00:00').getTime() : Date.now();
   const existing = assets.find(a=>a.name===name);
-  // 입력값 우선, 없으면 기존 자산값
+  // 입력값 우선, 없으면 기존 자산값 (카테고리/속성 참고용)
   const catVal  = catSel  || (existing?existing.category:null) || null;
   const attrVal = attrSel || (existing?existing.attribute:null) || null;
+  const currency = existing ? existing.currency : cur;
+  const fxRate = currency==='USD'?FX.USD:currency==='JPY'?FX.JPY:1;
+  const totalKRW = Math.round(price*qty*fxRate);
 
-  if(existing){
-    const fxRate = existing.currency==='USD'?FX.USD:existing.currency==='JPY'?FX.JPY:1;
-    const totalKRW = Math.round(price*qty*fxRate);
-    if(type==='buy'){
-      const totalQty = existing.quantity + qty;
-      existing.avgPrice = Math.round(((existing.avgPrice*existing.quantity)+(price*qty))/totalQty*100)/100;
-      existing.quantity = totalQty;
-      if(catSel) existing.category = catSel;
-      if(attrSel) existing.attribute = attrSel;
-      const cashName = existing.category!=='cash' ? adjustCashBalance(existing.currency, price*qty, -1) : null;
-      addTradeLog({name:existing.name, ticker:existing.ticker, type:'buy', at, category:catVal, attribute:attrVal, price, quantity:qty, currency:existing.currency, totalKRW, pnl:null, pnlPct:null, reason, cashAdjusted:cashName});
-      st.textContent = `✅ ${existing.name} 매수 기록 추가${cashName?` · ${cashName} 잔액 차감`:''}`;
-    } else {
-      if(qty>existing.quantity){ st.textContent=`❌ 보유 수량(${existing.quantity.toLocaleString()}) 초과`; return; }
-      const pnl = (price-existing.avgPrice)*qty*fxRate;
-      const pnlPct = existing.avgPrice>0?((price-existing.avgPrice)/existing.avgPrice)*100:null;
-      const cashName = existing.category!=='cash' ? adjustCashBalance(existing.currency, price*qty, +1) : null;
-      if(qty===existing.quantity){
-        assets = assets.filter(x=>x.id!==existing.id);
-        selectedAssets.delete(existing.id); saveChartSel();
-      } else {
-        existing.quantity -= qty;
-        if(catSel) existing.category = catSel;
-        if(attrSel) existing.attribute = attrSel;
-      }
-      addTradeLog({name:existing.name, ticker:existing.ticker, type:'sell', at, category:catVal, attribute:attrVal, price, quantity:qty, currency:existing.currency, totalKRW, pnl:Math.round(pnl), pnlPct:pnlPct===null?null:Math.round(pnlPct*100)/100, reason, cashAdjusted:cashName});
-      st.textContent = `✅ ${existing.name} 매도 기록 추가${cashName?` · ${cashName} 잔액 가산`:''}`;
-    }
-    saveAssets(); renderAll();
-  } else {
-    // 자산목록에 없는 종목 → 이력만 기록
-    const fxRate2 = cur==='USD'?FX.USD:cur==='JPY'?FX.JPY:1;
-    const totalKRW = Math.round(price*qty*fxRate2);
-    addTradeLog({name, ticker:tickerInput||'—', type, at, category:catVal, attribute:attrVal, price, quantity:qty, currency:cur, totalKRW, pnl:null, pnlPct:null, reason, cashAdjusted:null});
-    st.textContent = `✅ ${name} 매매 이력 추가 (자산목록 미등록 · 보유수량/현금 미반영)`;
+  // 매매 이력 수동 폼 → 이력만 기록, 자산 목록/현금 업데이트 없음
+  let pnl=null, pnlPct=null;
+  if(type==='sell' && existing && existing.avgPrice>0){
+    pnl = Math.round((price-existing.avgPrice)*qty*fxRate);
+    pnlPct = Math.round(((price-existing.avgPrice)/existing.avgPrice)*10000)/100;
   }
+  addTradeLog({
+    name: existing?existing.name:name,
+    ticker: existing?existing.ticker:(tickerInput||'—'),
+    type, at, category:catVal, attribute:attrVal,
+    price, quantity:qty, currency, totalKRW,
+    pnl, pnlPct, reason, cashAdjusted:null
+  });
+  st.textContent = `✅ ${name} 매매 이력 추가 (자산 목록/현금 미반영)`;
   document.getElementById('tl_name').value='';
   document.getElementById('tl_date').value='';
   document.getElementById('tl_ticker').value='';
