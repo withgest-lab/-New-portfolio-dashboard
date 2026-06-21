@@ -287,6 +287,11 @@ tr[style*="background:#f0fff4"] td:first-child{background:#f0fff4!important;}
     </select></label>
     <label>체결단가<input id="tl_price" type="number" placeholder="0" style="width:78px"></label>
     <label>수량<input id="tl_qty" type="number" placeholder="0" style="width:62px"></label>
+    <label>통화<select id="tl_cur" style="width:65px">
+      <option value="KRW">KRW</option>
+      <option value="USD">USD</option>
+      <option value="JPY">JPY</option>
+    </select></label>
     <div style="flex:1 1 100%;display:flex;gap:10px;align-items:flex-end;">
       <label style="flex:1;min-width:160px;">사유<span style="font-size:9px;color:var(--color-tertiary);margin-left:2px;">(선택)</span>
         <input id="tl_reason" placeholder="매수·매도 사유" style="width:100%">
@@ -1168,6 +1173,7 @@ function addTradeLog_manual(){
   const attrSel = document.getElementById('tl_attr').value;
   const price = parseFloat(document.getElementById('tl_price').value);
   const qty   = parseFloat(document.getElementById('tl_qty').value);
+  const cur   = document.getElementById('tl_cur').value || 'KRW';
   const reason = document.getElementById('tl_reason').value.trim();
   const st = document.getElementById('tradeLogStatus');
 
@@ -1212,8 +1218,9 @@ function addTradeLog_manual(){
     saveAssets(); renderAll();
   } else {
     // 자산목록에 없는 종목 → 이력만 기록
-    const totalKRW = Math.round(price*qty);
-    addTradeLog({name, ticker:tickerInput||'—', type, at, category:catVal, attribute:attrVal, price, quantity:qty, currency:'KRW', totalKRW, pnl:null, pnlPct:null, reason, cashAdjusted:null});
+    const fxRate2 = cur==='USD'?FX.USD:cur==='JPY'?FX.JPY:1;
+    const totalKRW = Math.round(price*qty*fxRate2);
+    addTradeLog({name, ticker:tickerInput||'—', type, at, category:catVal, attribute:attrVal, price, quantity:qty, currency:cur, totalKRW, pnl:null, pnlPct:null, reason, cashAdjusted:null});
     st.textContent = `✅ ${name} 매매 이력 추가 (자산목록 미등록 · 보유수량/현금 미반영)`;
   }
   document.getElementById('tl_name').value='';
@@ -1223,6 +1230,7 @@ function addTradeLog_manual(){
   document.getElementById('tl_attr').value='';
   document.getElementById('tl_price').value='';
   document.getElementById('tl_qty').value='';
+  document.getElementById('tl_cur').value='KRW';
   document.getElementById('tl_reason').value='';
   setTimeout(()=>{st.textContent='';},3500);
 }
