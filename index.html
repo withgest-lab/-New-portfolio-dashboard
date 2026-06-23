@@ -2730,16 +2730,15 @@ function _getExistingIds(){
 }
 // 1D 기준 스냅샷 설정: 1D 시작 시각(어제 미국장) 직전의 마지막 스냅샷
 function setBase1DSnap(){
-  const startTs = getPeriodStart('1D').getTime();
+  const startTs = getPeriodStart('1D').getTime(); // 미국장 개장(22:30/23:30)
   const snaps = loadSnaps().sort((a,b)=>a.timestamp-b.timestamp);
   if(!snaps.length){ _base1DSnap = null; return; }
-  // startTs 이전(또는 같은) 스냅샷 중 가장 최근 것
-  const before = snaps.filter(s=>s.timestamp<=startTs);
+  // startTs(미국장 개장) 직전 스냅샷을 기준으로
+  // → 어제 미국장+오늘 한국장+일본장 전체 포함한 하루 기준
+  const before = snaps.filter(s=>s.timestamp <= startTs);
   if(before.length){
     _base1DSnap = before[before.length-1];
   } else {
-    // 이전 스냅샷이 없으면(기간 시작 전 데이터 없음) → 기간 내 첫 스냅샷을 기준으로
-    // (옛날 스냅샷을 쓰면 수익률이 과대 계산됨)
     _base1DSnap = snaps[0];
   }
 }
@@ -2803,10 +2802,18 @@ function isMarketPreOpen(a){
   const day = now.getDay(); // 0=일, 6=토
   // 주말이면 모든 종목 휴장 → 0%
   if(day === 0 || day === 6) return true;
-  // 평일: 미국장은 어젯밤 거래됨 → 개장 전 아님
+  // 평일: 미국장은 어젯밤/오늘밤 거래됨 → 개장 전 아님
   if(a.currency === 'USD') return false;
-  // KRW·JPY: 오전 9시 개장 전이면 거래 전
-  return now.getHours() < 9;
+  // KRW·JPY:
+  // ① 오전 9시 이전 → 개장 전
+  // ② 22:30(비서머)/22:30(서머) 이후 → 새 하루 시작, 한국/일본장 미개장 → 0%
+  const h = now.getHours(), m = now.getMinutes();
+  const hm = h * 60 + m;
+  const dst = isUSDST();
+  const usOpenHM = dst ? 22*60+30 : 23*60+30;
+  if(hm < 9*60) return true;   // 오전 9시 이전
+  if(hm >= usOpenHM) return true; // 미국장 개장 이후 → 새 하루, KRW/JPY 미거래
+  return false;
 }
 
 function buildSnapshotHistory(period){
